@@ -189,6 +189,18 @@ a.hcard{text-decoration:none;color:var(--tx)}
 .gdot[data-grp=keamanan]{background:#5eead4}.gdot[data-grp=encode]{background:#7c9cff}.gdot[data-grp=format]{background:#c084fc}.gdot[data-grp=generator]{background:#fbbf24}.gdot[data-grp=konversi]{background:#fb7185}
 .grp .gdot{margin-right:8px}
 .home-grp .gdot{margin-right:3px}
+/* ===== v3.4: isi penuh lebar layar (desktop) + tetap mobile-friendly ===== */
+/* halaman alat: sedikit lebih lega tapi tetap nyaman dibaca */
+.wrap{max-width:1120px}
+/* beranda: mengisi penuh lebar (grid katalog memang enak lebar) */
+.wrap:has(.home-hero){max-width:none}
+/* kartu menambah kolom otomatis saat layar lebar; jadi 1 kolom di HP */
+.home-grid{grid-template-columns:repeat(auto-fill,minmax(258px,1fr))}
+@media (min-width:1500px){ .wrap:has(.home-hero){padding-left:32px;padding-right:34px} .home-grid{gap:14px} }
+@media (min-width:2000px){ .home-grid{grid-template-columns:repeat(auto-fill,minmax(268px,1fr))} }
+/* jaga: konten lebar (out/tabel) tak pernah bikin halaman geser horizontal */
+.out,.serp,.diffline{max-width:100%}
+
 /* footer beranda */
 .home-foot{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);color:var(--tx3);font-size:12.5px;line-height:1.7}
 .home-foot a{color:var(--tx2);text-decoration:none}
