@@ -6,6 +6,16 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 const enc = new TextEncoder();
 const fire = inp => inp.dispatchEvent(new Event('input', { bubbles: true }));
 
+// Akar aplikasi (mis. "/devsec/") — dihitung dari lokasi app.js agar rute berbasis path jalan.
+const BASE = new URL('.', import.meta.url).pathname;
+// jsQR dimuat malas (lazy) — hanya saat alat "Baca QR" dibuka.
+let _jsqr;
+function loadJsQR() { return _jsqr || (_jsqr = new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('vendor/jsqr.min.js', import.meta.url).href; s.onload = () => res(window.jsQR); s.onerror = () => rej(new Error('gagal memuat pemindai')); document.head.appendChild(s); })); }
+// Pembersih: alat yang memasang listener global mendaftarkannya agar dilepas saat pindah alat.
+let _cleanup = null;
+function onCleanup(fn) { _cleanup = fn; }
+function runCleanup() { if (_cleanup) { try { _cleanup(); } catch (e) { } _cleanup = null; } }
+
 function toast(msg = 'Tersalin ✓') { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('on'), 1400); }
 function copy(text) { navigator.clipboard.writeText(text).then(() => toast()).catch(() => toast('Gagal menyalin')); }
 function withCopy(outEl, getText) { const b = el('button', 'copy', 'Salin'); b.type = 'button'; b.addEventListener('click', () => copy(typeof getText === 'function' ? getText() : outEl.innerText)); outEl.appendChild(b); return outEl; }
@@ -62,7 +72,7 @@ const TOOLS = [
 
   { id: 'aes', grp: 'Keamanan', e: '🔒', name: 'Enkripsi AES', desc: 'Enkripsi & dekripsi teks dengan AES-256-GCM + kata sandi (PBKDF2).',
     tujuan: '<b>Untuk apa:</b> mengunci teks rahasia (catatan, kunci API, pesan) memakai <b>AES-256-GCM</b> — standar enkripsi kuat. Kunci diturunkan dari kata sandimu via <b>PBKDF2 (150.000 iterasi)</b> + salt acak, jadi hanya yang tahu sandi bisa membuka. <b>Kapan:</b> mengirim teks sensitif lewat kanal tak aman. Semua di browser — teks &amp; sandi tak pernah keluar.',
-    contoh(root) { $('#pass', root).value = 'rahasia123'; $('#in', root).value = 'Ini pesan rahasia untuk diuji 🔐'; $('#m button[data-m=enc]', root).click(); },
+    contoh(root) { $('#pass', root).value = 'rahasia123'; $('#in', root).value = 'Ini pesan rahasia untuk diuji 🔐'; $('#m button[data-m=enc]', root).click(); $('#go', root).click(); },
     body(root) {
       let mode = 'enc';
       root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="enc" class="on">Enkripsi</button><button data-m="dec">Dekripsi</button></div></div>
@@ -239,6 +249,33 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run); $('#from', root).addEventListener('change', run);
     } },
 
+  { id: 'jsoncsv', grp: 'Format & Data', e: '📊', name: 'JSON → CSV', desc: 'Ubah array JSON objek menjadi tabel CSV (siap Excel).',
+    tujuan: '<b>Untuk apa:</b> mengubah data JSON berbentuk array objek menjadi CSV yang bisa dibuka di Excel / Google Sheets. Kolom diambil dari gabungan semua kunci; nilai objek/array ditulis sebagai JSON; koma &amp; kutip di-escape sesuai standar RFC 4180. <b>Kapan:</b> mengekspor respons API atau data ke spreadsheet.',
+    contoh(root) { $('#in', root).value = '[{"nama":"Andi","umur":25,"kota":"Yogyakarta"},{"nama":"Budi","umur":30,"kota":"Bandung","hobi":"catur"}]'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">JSON (array objek)</label><textarea id="in" style="min-height:150px" placeholder='[{"a":1,"b":2}]'></textarea>
+        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="semi"> Pemisah titik-koma (;)</label><button class="btn sm" id="dl" type="button">⭳ Unduh CSV</button><span id="stat"></span></div>
+        <label class="lbl" style="margin-top:6px">CSV</label><div class="out empty" id="out">—</div>`;
+      let lastCsv = '';
+      const cell = (v, sep) => { if (v == null) return ''; let s = typeof v === 'object' ? JSON.stringify(v) : String(v); if (s.includes('"') || s.includes(sep) || s.includes('\n') || s.includes('\r')) s = '"' + s.replace(/"/g, '""') + '"'; return s; };
+      const run = () => {
+        const raw = $('#in', root).value.trim(), out = $('#out', root), stat = $('#stat', root); lastCsv = '';
+        if (!raw) { out.textContent = '—'; out.classList.add('empty'); stat.innerHTML = ''; return; }
+        let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); }
+        if (!Array.isArray(data)) data = [data];
+        if (!data.length) return setErr(out, 'Array kosong');
+        const sep = $('#semi', root).checked ? ';' : ',';
+        const keys = []; for (const row of data) { if (row && typeof row === 'object' && !Array.isArray(row)) for (const k of Object.keys(row)) if (!keys.includes(k)) keys.push(k); }
+        if (!keys.length) return setErr(out, 'Butuh array berisi objek {…}');
+        const lines = [keys.map(k => cell(k, sep)).join(sep)];
+        for (const row of data) lines.push(keys.map(k => cell(row ? row[k] : '', sep)).join(sep));
+        lastCsv = lines.join('\r\n'); out.classList.remove('empty'); out.textContent = lastCsv; withCopy(out, () => lastCsv);
+        stat.innerHTML = `<span class="pill ok">${data.length} baris · ${keys.length} kolom</span>`;
+      };
+      $('#dl', root).addEventListener('click', () => { if (!lastCsv) return; const blob = new Blob(['﻿' + lastCsv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
+      $('#in', root).addEventListener('input', run); $('#semi', root).addEventListener('change', run);
+    } },
+
   // ---------- GENERATOR ----------
   { id: 'uuid', grp: 'Generator', e: '🆔', name: 'UUID Generator', desc: 'Buat UUID v4 acak (kriptografis), satu atau banyak.',
     tujuan: '<b>Untuk apa:</b> membuat pengenal unik (ID) untuk record database, request, atau file tanpa risiko bentrok. <b>Kapan:</b> butuh primary key/ID acak yang praktis unik secara global.',
@@ -268,6 +305,40 @@ const TOOLS = [
       };
       $('#dl', root).addEventListener('click', () => { if (!lastCanvas) return; const a = document.createElement('a'); a.href = lastCanvas.toDataURL('image/png'); a.download = 'qrcode.png'; a.click(); });
       $('#in', root).addEventListener('input', run); $('#ec', root).addEventListener('change', run);
+    } },
+
+  { id: 'qrdecode', grp: 'Generator', e: '📷', name: 'Baca QR (Gambar)', desc: 'Unggah gambar berisi QR code untuk membaca teks/URL-nya.',
+    tujuan: '<b>Untuk apa:</b> membaca isi QR code dari sebuah gambar (screenshot / foto) langsung di browser — tanpa kamera &amp; <b>tanpa mengunggah gambar</b> ke server. <b>Kapan:</b> memeriksa tujuan sebuah QR sebelum membukanya, atau mengambil teks dari QR yang tampil di layar.',
+    body(root) {
+      root.innerHTML = `<div class="drop" id="drop"><div class="big">Jatuhkan gambar QR di sini</div><div>atau klik untuk memilih · tempel (Ctrl/⌘+V) juga bisa · gambar tidak diunggah</div></div>
+        <input type="file" id="file" accept="image/*" style="display:none"><div id="out" style="margin-top:12px"></div>`;
+      const drop = $('#drop', root), file = $('#file', root), out = $('#out', root);
+      async function decode(src) {
+        out.innerHTML = '<div class="out empty">memindai…</div>';
+        let jsQR; try { jsQR = await loadJsQR(); } catch (e) { return setErr(out, 'Gagal memuat pemindai QR'); }
+        const img = new Image();
+        img.onload = () => {
+          const max = 1200, sc = Math.min(1, max / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * sc)), h = Math.max(1, Math.round(img.height * sc));
+          const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h);
+          const code = jsQR(data.data, w, h);
+          if (!code) return setErr(out, 'Tidak ada QR yang terbaca di gambar ini — coba gambar lebih jelas/besar');
+          const txt = code.data, isUrl = /^https?:\/\//i.test(txt);
+          out.innerHTML = `<label class="lbl">Isi QR</label><div class="out">${esc(txt)}<button class="copy" data-c="${esc(txt)}">Salin</button></div>${isUrl ? `<div class="note">🔗 Ini tautan — periksa dulu sebelum membukanya.</div>` : ''}`;
+          out.querySelector('[data-c]').addEventListener('click', () => copy(txt));
+        };
+        img.onerror = () => setErr(out, 'Gagal memuat gambar'); img.src = src;
+      }
+      const handleFile = f => { if (!f || !f.type.startsWith('image/')) return; const r = new FileReader(); r.onload = () => decode(r.result); r.readAsDataURL(f); };
+      drop.addEventListener('click', () => file.click());
+      file.addEventListener('change', e => handleFile(e.target.files[0]));
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
+      const onPaste = e => { const it = [...((e.clipboardData || {}).items || [])].find(i => i.type.startsWith('image/')); if (it) handleFile(it.getAsFile()); };
+      addEventListener('paste', onPaste); onCleanup(() => removeEventListener('paste', onPaste));
     } },
 
   { id: 'lorem', grp: 'Generator', e: '📄', name: 'Lorem Ipsum', desc: 'Buat teks placeholder (kata/kalimat/paragraf).',
@@ -323,29 +394,68 @@ const TOOLS = [
     tujuan: '<b>Untuk apa:</b> mengonversi kode warna antar format yang dipakai CSS/desain. <b>Kapan:</b> menyamakan warna dari Figma ke CSS, atau menyesuaikan palet.',
     contoh(root) { $('#in', root).value = '#5eead4'; fire($('#in', root)); },
     body(root) { root.innerHTML = `<div class="row"><input type="color" id="pick" value="#5eead4" style="width:52px;height:44px;border:1px solid var(--line);border-radius:9px;background:none;cursor:pointer"><input class="f" id="in" value="#5eead4" style="max-width:240px" placeholder="#5eead4 / rgb(94,234,212)"></div><div id="out" style="margin-top:12px"></div><div id="sw" style="height:70px;border-radius:12px;border:1px solid var(--line);margin-top:12px"></div>`; function parse(str) { str = str.trim(); let m = str.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i); if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; } m = str.match(/rgba?\(([^)]+)\)/i); if (m) { const p = m[1].split(',').map(x => parseFloat(x)); return [p[0], p[1], p[2]]; } return null; } const toHex = ([r, g, b]) => '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join(''); const toHsl = ([r, g, b]) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, s = 0, l = (mx + mn) / 2; if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h /= 6; } return `hsl(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`; }; const run = (src) => { const rgb = parse(src); const out = $('#out', root); if (!rgb || rgb.some(isNaN)) return setErr(out, 'Warna tidak valid'); const hexv = toHex(rgb); $('#sw', root).style.background = hexv; $('#pick', root).value = hexv; out.innerHTML = [['HEX', hexv], ['RGB', `rgb(${rgb.map(Math.round).join(', ')})`], ['HSL', toHsl(rgb)]].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v" style="cursor:pointer" data-c="${esc(v)}">${esc(v)} ⧉</span></div>`).join(''); out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c))); }; $('#in', root).addEventListener('input', e => run(e.target.value)); $('#pick', root).addEventListener('input', e => { $('#in', root).value = e.target.value; run(e.target.value); }); run('#5eead4'); } },
+
+  { id: 'unit', grp: 'Konversi', e: '📐', name: 'Konversi Unit', desc: 'Konversi panjang, massa, suhu, & ukuran data.',
+    tujuan: '<b>Untuk apa:</b> mengonversi satuan yang sering dipakai — panjang, massa/berat, suhu, dan ukuran data — dengan cepat &amp; akurat (faktor konversi resmi). <b>Kapan:</b> mengubah km↔mil, kg↔pon, °C↔°F, atau MB↔GB.',
+    contoh(root) { $('#val', root).value = '100'; fire($('#val', root)); },
+    body(root) {
+      const CATS = {
+        'Panjang': { u: { 'Milimeter (mm)': .001, 'Sentimeter (cm)': .01, 'Meter (m)': 1, 'Kilometer (km)': 1000, 'Inci (in)': .0254, 'Kaki (ft)': .3048, 'Yard (yd)': .9144, 'Mil': 1609.344 } },
+        'Massa': { u: { 'Miligram (mg)': .001, 'Gram (g)': 1, 'Kilogram (kg)': 1000, 'Ton': 1e6, 'Ons (oz)': 28.349523125, 'Pon (lb)': 453.59237 } },
+        'Suhu': { temp: true, u: { 'Celsius (°C)': 'C', 'Fahrenheit (°F)': 'F', 'Kelvin (K)': 'K' } },
+        'Data': { u: { 'Bit': .125, 'Byte (B)': 1, 'Kilobyte (KB)': 1024, 'Megabyte (MB)': 1048576, 'Gigabyte (GB)': 1073741824, 'Terabyte (TB)': 1099511627776 } }
+      };
+      root.innerHTML = `<div class="row"><div style="flex:1;min-width:160px"><label class="lbl">Kategori</label><select class="f" id="cat"></select></div></div>
+        <div class="cardrow"><div><label class="lbl">Dari</label><input class="f" id="val" placeholder="100"><select class="f" id="from" style="margin-top:8px"></select></div>
+        <div><label class="lbl">Ke</label><div class="out" id="res" style="min-height:auto;cursor:pointer" title="klik untuk menyalin">—</div><select class="f" id="to" style="margin-top:8px"></select></div></div>`;
+      const catSel = $('#cat', root), fromSel = $('#from', root), toSel = $('#to', root), val = $('#val', root), res = $('#res', root);
+      catSel.innerHTML = Object.keys(CATS).map(c => `<option>${c}</option>`).join('');
+      const toC = { C: v => v, F: v => (v - 32) * 5 / 9, K: v => v - 273.15 }, fromC = { C: v => v, F: v => v * 9 / 5 + 32, K: v => v + 273.15 };
+      const fill = () => { const keys = Object.keys(CATS[catSel.value].u); fromSel.innerHTML = keys.map(k => `<option>${k}</option>`).join(''); toSel.innerHTML = keys.map(k => `<option>${k}</option>`).join(''); fromSel.selectedIndex = 0; toSel.selectedIndex = Math.min(1, keys.length - 1); };
+      const run = () => { const c = CATS[catSel.value], v = parseFloat(val.value); if (val.value.trim() === '' || isNaN(v)) { res.textContent = '—'; return; } let o; if (c.temp) { o = fromC[c.u[toSel.value]](toC[c.u[fromSel.value]](v)); } else { o = v * c.u[fromSel.value] / c.u[toSel.value]; } const r = (o !== 0 && (Math.abs(o) >= 1e15 || Math.abs(o) < 1e-6)) ? o.toExponential(6) : String(+o.toFixed(6)); res.textContent = r; };
+      catSel.addEventListener('change', () => { fill(); run(); });[fromSel, toSel, val].forEach(x => x.addEventListener('input', run));
+      res.addEventListener('click', () => { if (res.textContent && res.textContent !== '—') copy(res.textContent); });
+      fill(); run();
+    } },
 ];
 
 const GROUPS = ['Keamanan', 'Encode / Decode', 'Format & Data', 'Generator', 'Konversi'];
+const HOME_TITLE = 'DevSec Toolbox — Alat Developer & Keamanan Online (100% di Browser)';
+const HOME_DESC = 'Kumpulan alat developer & keamanan gratis yang berjalan 100% di browser: JWT decoder, enkripsi AES, hash SHA & MD5, HMAC, JSON, regex, QR, konversi unit, dan lainnya. Tanpa server, data tidak dikirim ke mana pun.';
 
-// ================= SHELL =================
+// ================= RUTE (berbasis path, ramah SEO) =================
+// Tiap alat punya URL sendiri: <BASE><id>/ (mis. /devsec/jwt/). Klik menu = navigasi
+// dalam-halaman via History API (cepat, tanpa reload); akses langsung/crawler = halaman statis nyata.
 const nav = $('#nav');
+const urlFor = id => id === 'home' ? BASE : BASE + id + '/';
+function tid(t) { return `<a class="nlink" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span> ${t.name}</a>`; }
 function buildNav(filter = '') {
   const f = filter.toLowerCase().trim();
-  let html = `<button class="nlink" data-id="home"><span class="e">🏠</span> Beranda</button>`;
+  let html = `<a class="nlink" data-id="home" href="${BASE}"><span class="e">🏠</span> Beranda</a>`;
   for (const g of GROUPS) {
     const arr = TOOLS.filter(t => t.grp === g && (!f || (t.name + ' ' + t.id + ' ' + t.desc).toLowerCase().includes(f)));
     if (!arr.length) continue;
-    html += `<div class="grp">${g}</div>` + arr.map(t => `<button class="nlink" data-id="${t.id}"><span class="e">${t.e}</span> ${t.name}</button>`).join('');
+    html += `<div class="grp">${g}</div>` + arr.map(tid).join('');
   }
   nav.innerHTML = html;
-  nav.querySelectorAll('.nlink').forEach(b => b.addEventListener('click', () => { location.hash = b.dataset.id; document.body.classList.remove('nav-open'); }));
+  nav.querySelectorAll('.nlink').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); document.body.classList.remove('nav-open'); }));
   markActive();
 }
-function markActive() { const id = current(); nav.querySelectorAll('.nlink').forEach(b => b.classList.toggle('on', b.dataset.id === id)); }
-function current() { const id = location.hash.replace('#', ''); return id === 'home' || TOOLS.some(t => t.id === id) ? id : 'home'; }
+function markActive() { const id = current(); nav.querySelectorAll('.nlink').forEach(a => a.classList.toggle('on', a.dataset.id === id)); }
+function current() {
+  let p = decodeURIComponent(location.pathname);
+  if (p.startsWith(BASE)) p = p.slice(BASE.length);
+  p = p.replace(/index\.html?$/i, '').replace(/^\/+|\/+$/g, '');
+  const id = p.split('/')[0];
+  if (!id) return 'home';
+  if (TOOLS.some(t => t.id === id)) return id;
+  return document.body.dataset.tool && TOOLS.some(t => t.id === document.body.dataset.tool) ? document.body.dataset.tool : 'home';
+}
+function setMeta(title, desc) { document.title = title; const md = document.querySelector('meta[name="description"]'); if (md && desc) md.setAttribute('content', desc); }
 
 function renderHome() {
-  const grid = g => TOOLS.filter(t => t.grp === g).map(t => `<button class="hcard" data-id="${t.id}"><span class="e">${t.e}</span><span><b>${t.name}</b><span>${esc(t.desc)}</span></span></button>`).join('');
+  runCleanup();
+  const grid = g => TOOLS.filter(t => t.grp === g).map(t => `<a class="hcard" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span><b>${t.name}</b><span>${esc(t.desc)}</span></span></a>`).join('');
   const root = $('#tool');
   $('#ttl').textContent = 'Beranda'; $('#desc').textContent = '';
   root.innerHTML = `<div class="home-hero">
@@ -359,12 +469,13 @@ function renderHome() {
       </div>
     </div>
     ${GROUPS.map(g => `<div class="home-grp">${g}</div><div class="home-grid">${grid(g)}</div>`).join('')}`;
-  root.querySelectorAll('.hcard').forEach(b => b.addEventListener('click', () => location.hash = b.dataset.id));
-  document.title = 'DevSec Toolbox — Alat Developer & Keamanan';
-  markActive(); $('.main').scrollTop = 0;
+  root.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));
+  setMeta(HOME_TITLE, HOME_DESC);
+  markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
 
 function open(id) {
+  runCleanup();
   if (id === 'home') return renderHome();
   const t = TOOLS.find(x => x.id === id) || TOOLS[0];
   $('#ttl').textContent = t.name; $('#desc').textContent = t.desc;
@@ -373,11 +484,14 @@ function open(id) {
   root.appendChild(pb);
   const bodyWrap = el('div'); root.appendChild(bodyWrap); t.body(bodyWrap);
   if (t.contoh) $('#_ex', pb).addEventListener('click', () => t.contoh(bodyWrap));
-  document.title = t.name + ' — DevSec Toolbox'; markActive(); $('.main').scrollTop = 0;
+  setMeta(t.name + ' — DevSec Toolbox', t.desc);
+  markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
-addEventListener('hashchange', () => open(current()));
+
+function go(id, push) { if (push) { const u = urlFor(id); if (location.pathname !== u) history.pushState({ id }, '', u); } open(id); }
+addEventListener('popstate', () => open(current()));
 $('#search').addEventListener('input', e => buildNav(e.target.value));
 $('#menutgl').addEventListener('click', () => document.body.classList.toggle('nav-open'));
 buildNav(); open(current());
 
-window.__DS = { tools: TOOLS.map(t => t.id), groups: GROUPS, get active() { return current(); }, open(id) { location.hash = id; } };
+window.__DS = { tools: TOOLS.map(t => t.id), groups: GROUPS, get active() { return current(); }, open(id) { go(id, true); } };
