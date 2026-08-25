@@ -637,19 +637,32 @@ const HOME_DESC = 'Kumpulan alat developer & keamanan gratis yang berjalan 100% 
 const nav = $('#nav');
 const urlFor = id => id === 'home' ? BASE : BASE + id + '/';
 function tid(t) { return `<a class="nlink" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span> ${t.name}</a>`; }
+let navFilter = '';
+const openGroups = new Set();
+function navClick(e) { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(e.currentTarget.dataset.id, true); document.body.classList.remove('nav-open'); }
+// Sidebar kategori yang bisa dilipat: di beranda ringkas (semua terlipat), terbuka di halaman alat / saat dicari.
 function buildNav(filter = '') {
+  navFilter = filter;
   const f = filter.toLowerCase().trim();
-  let html = `<a class="nlink" data-id="home" href="${BASE}"><span class="e">🏠</span> Beranda</a>`;
+  const activeGroup = (TOOLS.find(t => t.id === current()) || {}).grp;
+  let html = `<a class="nlink navhome" data-id="home" href="${BASE}"><span class="e">🏠</span> Beranda</a>`;
   for (const g of GROUPS) {
     const arr = TOOLS.filter(t => t.grp === g && (!f || (t.name + ' ' + t.id + ' ' + t.desc).toLowerCase().includes(f)));
     if (!arr.length) continue;
-    html += `<div class="grp"><span class="gdot" data-grp="${SLUG[g]}"></span>${g} <span class="grp-cnt">${arr.length}</span></div>` + arr.map(tid).join('');
+    const isOpen = f ? true : (g === activeGroup || openGroups.has(SLUG[g]));
+    html += `<button type="button" class="grp${isOpen ? ' open' : ''}" data-g="${SLUG[g]}" aria-expanded="${isOpen}"><span class="gdot" data-grp="${SLUG[g]}"></span><span class="grp-name">${g}</span><span class="grp-cnt">${arr.length}</span><svg class="grp-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button><div class="grp-items${isOpen ? ' open' : ''}" data-g="${SLUG[g]}">${arr.map(tid).join('')}</div>`;
   }
   nav.innerHTML = html;
-  nav.querySelectorAll('.nlink').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); document.body.classList.remove('nav-open'); }));
+  nav.querySelectorAll('a.nlink').forEach(a => a.addEventListener('click', navClick));
+  nav.querySelectorAll('button.grp').forEach(b => b.addEventListener('click', () => { const items = nav.querySelector(`.grp-items[data-g="${b.dataset.g}"]`); const nowOpen = b.classList.toggle('open'); b.setAttribute('aria-expanded', String(nowOpen)); if (items) items.classList.toggle('open', nowOpen); nowOpen ? openGroups.add(b.dataset.g) : openGroups.delete(b.dataset.g); }));
   markActive();
 }
-function markActive() { const id = current(); nav.querySelectorAll('.nlink').forEach(a => a.classList.toggle('on', a.dataset.id === id)); }
+function markActive() {
+  const id = current();
+  nav.querySelectorAll('.nlink').forEach(a => a.classList.toggle('on', a.dataset.id === id));
+  const ag = (TOOLS.find(t => t.id === id) || {}).grp;
+  if (ag && !navFilter) { const slug = SLUG[ag], b = nav.querySelector(`button.grp[data-g="${slug}"]`), items = nav.querySelector(`.grp-items[data-g="${slug}"]`); if (b && items && !b.classList.contains('open')) { b.classList.add('open'); b.setAttribute('aria-expanded', 'true'); items.classList.add('open'); openGroups.add(slug); } }
+}
 function current() {
   let p = decodeURIComponent(location.pathname);
   if (p.startsWith(BASE)) p = p.slice(BASE.length);
