@@ -2,7 +2,7 @@
 
 # 🧰 DevSec Toolbox
 
-### 23 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
+### 26 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
 
 **[▶ Buka DevSec Toolbox](https://ksatriabintangsamudra.my.id/devsec/)**
 
@@ -14,15 +14,15 @@
 
 Kumpulan lengkap alat harian untuk **developer, analis, dan security enthusiast** — tanpa instal, tanpa login, **tanpa kirim data**. Tiap alat dilengkapi penjelasan **"untuk apa & kapan dipakai"** dan tombol **contoh**, sehingga pengunjung langsung paham tujuannya. Aman bahkan untuk token & secret sensitif karena semuanya diproses di perangkatmu.
 
-## 🧩 23 Alat, 5 Kategori
+## 🧩 26 Alat, 5 Kategori
 
 | Kategori | Alat |
 |---|---|
 | **🔐 Keamanan** | **JWT Decoder & Verify** (verifikasi tanda tangan HS256) · **Enkripsi AES-256-GCM** (PBKDF2) · Hash Teks (MD5/SHA-1/256/512) · **Hash File** · HMAC-SHA256 · Password Generator · **Cek Kekuatan Sandi** |
 | **🔡 Encode / Decode** | Base64 (UTF-8 & URL-safe) · URL · HTML Entities · Escape String |
-| **📦 Format & Data** | JSON Formatter · Regex Tester · **Diff Teks** · Konversi Basis Angka |
-| **🎲 Generator** | UUID v4 · **QR Code** (unduh PNG) · Lorem Ipsum |
-| **🧭 Konversi** | Timestamp · **Cron Parser** (5 jadwal berikutnya) · URL Parser · Teks & Kasus · Warna (HEX/RGB/HSL) |
+| **📦 Format & Data** | JSON Formatter · Regex Tester · **Diff Teks** · Konversi Basis Angka · **JSON → CSV** (unduh, siap Excel) |
+| **🎲 Generator** | UUID v4 · **QR Code** (unduh PNG) · **Baca QR dari gambar** (jsQR, tanpa unggah) · Lorem Ipsum |
+| **🧭 Konversi** | Timestamp · **Cron Parser** (5 jadwal berikutnya) · URL Parser · Teks & Kasus · Warna (HEX/RGB/HSL) · **Konversi Unit** (panjang/massa/suhu/data) |
 
 ## ✅ Benar-benar valid — bukan asal jadi
 
@@ -38,13 +38,17 @@ Setiap alat diuji terhadap **nilai/vektor standar**:
 
 - 🔒 **Privat** — nol request jaringan; token, secret, & file tak pernah keluar dari browser.
 - 🎯 **Berorientasi tujuan** — tiap alat menjelaskan gunanya + contoh sekali klik.
-- ⚡ **Cepat & ringkas** — pencarian alat, tautan langsung (mis. `#jwt`), responsif di HP.
+- ⚡ **Cepat & ringkas** — pencarian alat, navigasi tanpa reload, responsif di HP.
 
 <img src="./docs/aes.png" width="100%" alt="DevSec Toolbox — Enkripsi AES">
 
+## 🔎 Ramah SEO
+
+Setiap alat punya **URL sendiri yang bisa diindeks** — mis. `/devsec/jwt/`, `/devsec/unit/` — lengkap dengan `<title>`, `meta description`, `canonical`, dan **JSON-LD** (`SoftwareApplication` + `BreadcrumbList`) yang unik. Navigasi antar-alat memakai **History API** (cepat, tanpa reload), sementara akses langsung/crawler mendapat **halaman statis penuh** berisi seluruh tautan internal. Dilengkapi **`sitemap.xml`** & **`robots.txt`**.
+
 ## 🛠️ Teknologi
 
-HTML + CSS + JavaScript **murni**. Kripto memakai **Web Crypto API** (`crypto.subtle`) untuk SHA/HMAC/AES-GCM/PBKDF2; MD5 diimplementasi lokal; UUID & password via `crypto.getRandomValues`; QR via `qrcode-generator` (di-vendor lokal). Hosting statis di GitHub Pages.
+HTML + CSS + JavaScript **murni**. Kripto memakai **Web Crypto API** (`crypto.subtle`) untuk SHA/HMAC/AES-GCM/PBKDF2; MD5 diimplementasi lokal; UUID & password via `crypto.getRandomValues`; QR dibuat via `qrcode-generator` & dibaca via `jsQR` (keduanya di-vendor lokal). Hosting statis di GitHub Pages, rute berbasis path ramah SEO.
 
 ---
 
