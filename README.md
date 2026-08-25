@@ -2,45 +2,49 @@
 
 # 🧰 DevSec Toolbox
 
-### 12 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
+### 23 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
 
 **[▶ Buka DevSec Toolbox](https://ksatriabintangsamudra.my.id/devsec/)**
 
-<img src="./docs/jwt.png" width="100%" alt="DevSec Toolbox — JWT Decoder">
+<img src="./docs/home.png" width="100%" alt="DevSec Toolbox — Beranda">
 
 </div>
 
 ---
 
-Alat harian untuk developer, analis, dan security enthusiast — **tanpa instal, tanpa login, tanpa kirim data**. Semua diproses di perangkatmu (penting untuk data sensitif seperti token & secret).
+Kumpulan lengkap alat harian untuk **developer, analis, dan security enthusiast** — tanpa instal, tanpa login, **tanpa kirim data**. Tiap alat dilengkapi penjelasan **"untuk apa & kapan dipakai"** dan tombol **contoh**, sehingga pengunjung langsung paham tujuannya. Aman bahkan untuk token & secret sensitif karena semuanya diproses di perangkatmu.
 
-## 🧩 Alat yang tersedia
+## 🧩 23 Alat, 5 Kategori
 
-| Grup | Alat |
+| Kategori | Alat |
 |---|---|
-| **Encode / Decode** | Base64 (UTF-8 & URL-safe) · URL encode/decode · **JWT Decoder** (header, payload, klaim exp/iat) |
-| **Hash & ID** | Hash teks (**MD5, SHA-1, SHA-256, SHA-512** sekaligus) · **HMAC-SHA256** · UUID v4 · **Password Generator** (dengan meter entropi) |
-| **Format** | JSON formatter/minify/validator · **Regex tester** (sorot kecocokan + grup) |
-| **Konversi** | Unix timestamp ↔ tanggal · Teks & kasus (UPPER/camel/snake/kebab/slug, urut, uniq) · Warna (HEX ↔ RGB ↔ HSL) |
+| **🔐 Keamanan** | **JWT Decoder & Verify** (verifikasi tanda tangan HS256) · **Enkripsi AES-256-GCM** (PBKDF2) · Hash Teks (MD5/SHA-1/256/512) · **Hash File** · HMAC-SHA256 · Password Generator · **Cek Kekuatan Sandi** |
+| **🔡 Encode / Decode** | Base64 (UTF-8 & URL-safe) · URL · HTML Entities · Escape String |
+| **📦 Format & Data** | JSON Formatter · Regex Tester · **Diff Teks** · Konversi Basis Angka |
+| **🎲 Generator** | UUID v4 · **QR Code** (unduh PNG) · Lorem Ipsum |
+| **🧭 Konversi** | Timestamp · **Cron Parser** (5 jadwal berikutnya) · URL Parser · Teks & Kasus · Warna (HEX/RGB/HSL) |
+
+## ✅ Benar-benar valid — bukan asal jadi
+
+Setiap alat diuji terhadap **nilai/vektor standar**:
+
+- `MD5("abc")` = `900150983cd24fb0d6963f7d28e17f72` · `SHA-256("abc")` = `ba7816bf…f20015ad`
+- **AES**: enkripsi → dekripsi kembali persis ke teks asli
+- **JWT Verify**: secret benar → **VALID**, secret salah → **ditolak**
+- **QR**: hasil di-generate lalu **berhasil dipindai balik** (terbukti scannable)
+- **Cron / Base angka / Diff / Timestamp**: dicek dengan kasus yang diketahui hasilnya
 
 ## ✨ Kenapa dipakai
 
-- 🔒 **Privat** — token JWT, secret HMAC, dan datamu **tidak pernah meninggalkan browser**. Tidak ada request jaringan.
-- ⚡ **Cepat** — satu halaman, pencarian alat, tautan langsung per alat (mis. `#jwt`).
-- 🎯 **Akurat** — hash diverifikasi terhadap nilai standar (mis. `MD5("abc") = 900150983cd24fb0d6963f7d28e17f72`).
-- 📱 **Responsif** — sidebar jadi drawer di ponsel.
+- 🔒 **Privat** — nol request jaringan; token, secret, & file tak pernah keluar dari browser.
+- 🎯 **Berorientasi tujuan** — tiap alat menjelaskan gunanya + contoh sekali klik.
+- ⚡ **Cepat & ringkas** — pencarian alat, tautan langsung (mis. `#jwt`), responsif di HP.
 
-<img src="./docs/hash.png" width="100%" alt="DevSec Toolbox — Hash Teks">
+<img src="./docs/aes.png" width="100%" alt="DevSec Toolbox — Enkripsi AES">
 
 ## 🛠️ Teknologi
 
-HTML + CSS + JavaScript **murni**, tanpa framework/dependensi. Hash SHA & HMAC memakai **Web Crypto API** (`crypto.subtle`); MD5 diimplementasi lokal; UUID & password pakai `crypto.getRandomValues`. Hosting statis di GitHub Pages.
-
-## 💻 Menjalankan lokal
-
-```bash
-python3 -m http.server 8080     # lalu buka http://localhost:8080
-```
+HTML + CSS + JavaScript **murni**. Kripto memakai **Web Crypto API** (`crypto.subtle`) untuk SHA/HMAC/AES-GCM/PBKDF2; MD5 diimplementasi lokal; UUID & password via `crypto.getRandomValues`; QR via `qrcode-generator` (di-vendor lokal). Hosting statis di GitHub Pages.
 
 ---
 
