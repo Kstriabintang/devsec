@@ -70,6 +70,29 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run); $('#sec', root).addEventListener('input', run);
     } },
 
+  { id: 'jwtgen', grp: 'Keamanan', e: '🏷️', name: 'JWT Generator (HS256)', desc: 'Buat & tanda tangani token JWT HS256 dari payload + secret.',
+    tujuan: '<b>Untuk apa:</b> membuat token JWT bertanda tangan <b>HS256</b> dari payload (klaim) &amp; secret-mu — untuk menguji API/otorisasi tanpa backend. <b>Kapan:</b> butuh token uji cepat. Payload &amp; secret tidak pernah keluar dari browser. <b>Catatan:</b> jangan tempel secret produksi asli di alat online mana pun.',
+    contoh(root) { $('#pl', root).value = '{\n  "sub": "1234567890",\n  "name": "Nadia",\n  "role": "admin"\n}'; $('#sec', root).value = 'secret'; fire($('#pl', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Payload (JSON)</label><textarea id="pl" style="min-height:120px" placeholder='{"sub":"123","role":"admin"}'></textarea>
+        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="iat" checked> Tambah iat (sekarang)</label><label class="chk"><input type="checkbox" id="exp"> Tambah exp (+1 jam)</label></div>
+        <label class="lbl" style="margin-top:8px">Secret (HMAC)</label><input class="f" id="sec" placeholder="secret">
+        <label class="lbl" style="margin-top:12px">Token JWT</label><div class="out empty" id="out">—</div>
+        <div class="note">Hasilnya bisa langsung diperiksa di alat <b>JWT Decoder &amp; Verify</b> (tempel token + secret yang sama).</div>`;
+      const b64urlJson = o => b64url(enc.encode(JSON.stringify(o)));
+      const run = async () => {
+        const out = $('#out', root), raw = $('#pl', root).value.trim(); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; }
+        let pl; try { pl = JSON.parse(raw); } catch (e) { return setErr(out, 'Payload bukan JSON valid: ' + e.message); }
+        if (typeof pl !== 'object' || Array.isArray(pl) || pl === null) return setErr(out, 'Payload harus objek {…}');
+        const sec = $('#sec', root).value; if (!sec) return setErr(out, 'Isi secret HMAC dulu');
+        const now = Math.floor(Date.now() / 1000); if ($('#iat', root).checked) pl.iat = now; if ($('#exp', root).checked) pl.exp = now + 3600;
+        const signingInput = b64urlJson({ alg: 'HS256', typ: 'JWT' }) + '.' + b64urlJson(pl);
+        const token = signingInput + '.' + b64url(await hmacSha256(sec, signingInput));
+        out.classList.remove('empty'); out.textContent = token; withCopy(out, () => token);
+      };
+      root.querySelectorAll('textarea,input').forEach(x => x.addEventListener('input', run));
+    } },
+
   { id: 'aes', grp: 'Keamanan', e: '🔒', name: 'Enkripsi AES', desc: 'Enkripsi & dekripsi teks dengan AES-256-GCM + kata sandi (PBKDF2).',
     tujuan: '<b>Untuk apa:</b> mengunci teks rahasia (catatan, kunci API, pesan) memakai <b>AES-256-GCM</b> — standar enkripsi kuat. Kunci diturunkan dari kata sandimu via <b>PBKDF2 (150.000 iterasi)</b> + salt acak, jadi hanya yang tahu sandi bisa membuka. <b>Kapan:</b> mengirim teks sensitif lewat kanal tak aman. Semua di browser — teks &amp; sandi tak pernah keluar.',
     contoh(root) { $('#pass', root).value = 'rahasia123'; $('#in', root).value = 'Ini pesan rahasia untuk diuji 🔐'; $('#m button[data-m=enc]', root).click(); $('#go', root).click(); },
@@ -348,6 +371,64 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run);
     } },
 
+  { id: 'yamljson', grp: 'Format & Data', e: '🔃', name: 'YAML → JSON', desc: 'Ubah YAML (subset umum) menjadi JSON.',
+    tujuan: '<b>Untuk apa:</b> mengubah <b>YAML</b> (map, list, list-of-map, skalar, komentar) menjadi JSON. <b>Kapan:</b> menyalin config YAML ke JSON. Mendukung subset umum YAML; fitur lanjutan (anchor, blok multi-baris <span class="mono">|</span>/<span class="mono">&gt;</span>, gaya flow) belum didukung dan akan memberi pesan error, bukan hasil salah.',
+    contoh(root) { $('#in', root).value = 'name: devsec\nversion: 3\naktif: true\ntags:\n  - dev\n  - security\nmeta:\n  author: Ksatria\n  tools: 26\nusers:\n  - name: Andi\n    role: admin\n  - name: Budi\n    role: editor'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">YAML</label><textarea id="in" style="min-height:170px" placeholder="key: value&#10;list:&#10;  - a&#10;  - b"></textarea><label class="lbl" style="margin-top:12px">JSON</label><div class="out empty" id="out">—</div>`;
+      const findComment = s => { let q = null; for (let i = 0; i < s.length; i++) { const c = s[i]; if (q) { if (c === q) q = null; } else if (c === '"' || c === "'") q = c; else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return i; } return -1; };
+      const unquote = s => { s = s.trim(); if (s[0] === '"' && s.endsWith('"')) { try { return JSON.parse(s); } catch (_) { return s.slice(1, -1); } } if (s[0] === "'" && s.endsWith("'")) return s.slice(1, -1).replace(/''/g, "'"); return s; };
+      const scalar = s => { s = s.trim(); if (s === '' || s === '~' || s === 'null') return null; if ((s[0] === '"' && s.endsWith('"')) || (s[0] === "'" && s.endsWith("'"))) return unquote(s); if (s === 'true') return true; if (s === 'false') return false; if (/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return Number(s); if (/^\[.*\]$|^\{.*\}$/.test(s)) { try { return JSON.parse(s); } catch (_) { } } return s; };
+      const matchKey = s => s.match(/^("(?:[^"\\]|\\.)*"|'[^']*'|[^:]+?)\s*:\s*(.*)$/);
+      const parse = src => {
+        const lines = [];
+        for (let raw of src.replace(/\r\n?/g, '\n').replace(/\t/g, '  ').split('\n')) { if (/^\s*#/.test(raw) || raw.trim() === '') continue; const h = findComment(raw); let line = h >= 0 ? raw.slice(0, h) : raw; line = line.replace(/\s+$/, ''); if (line.trim() === '') continue; lines.push({ indent: line.match(/^ */)[0].length, text: line.trim() }); }
+        let pos = 0;
+        const node = minInd => { if (pos >= lines.length) return null; const ind = lines[pos].indent; if (ind < minInd) return null; return (lines[pos].text === '-' || lines[pos].text.startsWith('- ')) ? list(ind) : map(ind); };
+        const list = ind => { const arr = []; while (pos < lines.length && lines[pos].indent === ind && (lines[pos].text === '-' || lines[pos].text.startsWith('- '))) { const rest = lines[pos].text === '-' ? '' : lines[pos].text.slice(2); if (rest === '') { pos++; arr.push(node(ind + 1)); } else if (matchKey(rest)) { lines[pos] = { indent: ind + 2, text: rest }; arr.push(map(ind + 2)); } else { pos++; arr.push(scalar(rest)); } } return arr; };
+        const map = ind => { const obj = {}; while (pos < lines.length && lines[pos].indent === ind && !(lines[pos].text === '-' || lines[pos].text.startsWith('- '))) { const m = matchKey(lines[pos].text); if (!m) throw new Error('baris tidak valid: "' + lines[pos].text + '"'); const key = unquote(m[1].trim()), val = m[2]; if (val === '') { pos++; const c = node(ind + 1); obj[key] = c === null ? null : c; } else { pos++; obj[key] = scalar(val); } } return obj; };
+        const r = node(0); if (pos < lines.length) throw new Error('indentasi tidak konsisten dekat: "' + lines[pos].text + '"'); return r === null ? {} : r;
+      };
+      const run = () => { const raw = $('#in', root).value, out = $('#out', root); if (!raw.trim()) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = parse(raw); } catch (e) { return setErr(out, 'YAML tidak didukung/ tidak valid: ' + e.message); } const j = JSON.stringify(data, null, 2); out.classList.remove('empty'); out.textContent = j; withCopy(out, () => j); };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'jsonts', grp: 'Format & Data', e: '🧠', name: 'JSON → TypeScript', desc: 'Hasilkan interface TypeScript dari contoh JSON.',
+    tujuan: '<b>Untuk apa:</b> membuat definisi tipe <b>TypeScript</b> (interface) otomatis dari contoh data JSON — hemat waktu &amp; anti salah ketik saat memodelkan respons API. <b>Kapan:</b> memulai integrasi API di proyek TypeScript. Diproses di browser.',
+    contoh(root) { $('#in', root).value = '{"id":1,"name":"Nadia","active":true,"roles":["admin","editor"],"profile":{"age":25,"city":"Yogyakarta"},"tags":[]}'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Nama root</label><input class="f" id="rn" value="Root" style="width:160px"></div><label class="lbl" style="margin-top:10px">TypeScript</label><div class="out empty" id="out">—</div>`;
+      const pascal = s => { s = String(s).replace(/[^a-zA-Z0-9]+/g, ' ').trim(); if (!s) return 'X'; return s.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join('').replace(/^([0-9])/, '_$1'); };
+      const singular = s => s.replace(/ies$/, 'y').replace(/([^s])s$/, '$1') || s;
+      const isId = k => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
+      const gen = (data, rootName) => {
+        const defs = [], byName = new Map();
+        const typeOf = (v, hint) => {
+          if (v === null) return 'any';
+          if (Array.isArray(v)) { if (!v.length) return 'any[]'; const ts = [...new Set(v.map(x => typeOf(x, singular(hint))))]; return (ts.length === 1 ? ts[0] : '(' + ts.join(' | ') + ')') + '[]'; }
+          if (typeof v === 'object') return makeIf(v, hint);
+          if (typeof v === 'number') return 'number';
+          if (typeof v === 'boolean') return 'boolean';
+          if (typeof v === 'string') return 'string';
+          return 'any';
+        };
+        const makeIf = (obj, hint) => {
+          const keys = Object.keys(obj), sig = JSON.stringify(keys);
+          let nm = pascal(hint || 'Obj'), base = nm, n = 2;
+          while (byName.has(nm) && byName.get(nm) !== sig) { nm = base + (n++); }
+          if (byName.has(nm)) return nm;
+          byName.set(nm, sig); const idx = defs.length; defs.push('');
+          const fields = keys.length ? keys.map(k => `  ${isId(k) ? k : JSON.stringify(k)}: ${typeOf(obj[k], k)};`).join('\n') : '  [key: string]: any;';
+          defs[idx] = `interface ${nm} {\n${fields}\n}`; return nm;
+        };
+        const rootType = typeOf(data, rootName);
+        let head = ''; if (Array.isArray(data) || typeof data !== 'object' || data === null) head = `type ${pascal(rootName)} = ${rootType};\n\n`;
+        return head + defs.join('\n\n');
+      };
+      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); } const ts = gen(data, $('#rn', root).value.trim() || 'Root'); out.classList.remove('empty'); out.textContent = ts; withCopy(out, () => ts); };
+      $('#in', root).addEventListener('input', run); $('#rn', root).addEventListener('input', run);
+    } },
+
   // ---------- GENERATOR ----------
   { id: 'uuid', grp: 'Generator', e: '🆔', name: 'UUID Generator', desc: 'Buat UUID v4 acak (kriptografis), satu atau banyak.',
     tujuan: '<b>Untuk apa:</b> membuat pengenal unik (ID) untuk record database, request, atau file tanpa risiko bentrok. <b>Kapan:</b> butuh primary key/ID acak yang praktis unik secara global.',
@@ -562,7 +643,7 @@ function buildNav(filter = '') {
   for (const g of GROUPS) {
     const arr = TOOLS.filter(t => t.grp === g && (!f || (t.name + ' ' + t.id + ' ' + t.desc).toLowerCase().includes(f)));
     if (!arr.length) continue;
-    html += `<div class="grp">${g} <span class="grp-cnt">${arr.length}</span></div>` + arr.map(tid).join('');
+    html += `<div class="grp"><span class="gdot" data-grp="${SLUG[g]}"></span>${g} <span class="grp-cnt">${arr.length}</span></div>` + arr.map(tid).join('');
   }
   nav.innerHTML = html;
   nav.querySelectorAll('.nlink').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); document.body.classList.remove('nav-open'); }));
@@ -580,28 +661,31 @@ function current() {
 }
 function setMeta(title, desc) { document.title = title; const md = document.querySelector('meta[name="description"]'); if (md && desc) md.setAttribute('content', desc); }
 
-const card = t => `<a class="hcard" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
+const SLUG = { 'Keamanan': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Konversi': 'konversi' };
+const card = t => `<a class="hcard" data-grp="${SLUG[t.grp]}" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
 function renderHome() {
   runCleanup();
   const root = $('#tool');
   $('#ttl').textContent = 'Beranda'; $('#desc').textContent = '';
   const counts = Object.fromEntries(GROUPS.map(g => [g, TOOLS.filter(t => t.grp === g).length]));
+  const gdot = g => `<span class="gdot" data-grp="${SLUG[g]}"></span>`;
   root.innerHTML = `<div class="home-hero">
       <div class="home-eyebrow">🧰 ${TOOLS.length} alat · 100% di browser · gratis</div>
-      <h2>Semua alat <span class="g">developer &amp; keamanan</span> dalam satu tempat.</h2>
-      <p>Dari decode JWT, enkripsi AES, hash &amp; HMAC, hingga QR, regex, konversi &amp; SEO — semuanya berjalan <b>di dalam browser-mu</b>, tanpa server dan tanpa mengirim data ke mana pun.</p>
+      <h2>Perkakas <span class="g">developer &amp; keamanan</span> yang berguna buat siapa saja.</h2>
+      <p>Dari decode JWT, enkripsi AES, hash &amp; HMAC, hingga QR, regex, konversi &amp; SEO — semuanya berjalan <b>di dalam browser-mu</b>, tanpa server &amp; tanpa kirim data. Gratis, buat siapa pun.</p>
       <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="hsearch" type="text" placeholder="Cari alat… mis. jwt, hash, qr, warna, csv"><kbd>/</kbd></div>
       <div class="home-badges"><span class="hb">🔒 <b>On-device</b></span><span class="hb">⚡ <b>Instan</b></span><span class="hb">✅ <b>Teruji</b></span><span class="hb">🆓 <b>Tanpa iklan</b></span></div>
     </div>
     <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">Semua <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
-    <div id="hgrid"></div>`;
+    <div id="hgrid"></div>
+    <div class="home-foot">Dibuat oleh <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">kode sumber</a> · semua alat berjalan lokal di browser-mu.</div>`;
   let group = 'all', query = '';
   const grid = $('#hgrid', root);
   const wire = () => grid.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));
   const render = () => {
     const q = query.toLowerCase().trim();
     if (group === 'all' && !q) {
-      grid.innerHTML = GROUPS.map(g => `<div class="home-grp">${esc(g)} <span class="hg-cnt">${counts[g]}</span></div><div class="home-grid">${TOOLS.filter(t => t.grp === g).map(card).join('')}</div>`).join('');
+      grid.innerHTML = GROUPS.map(g => `<div class="home-grp">${gdot(g)}${esc(g)} <span class="hg-cnt">${counts[g]}</span></div><div class="home-grid">${TOOLS.filter(t => t.grp === g).map(card).join('')}</div>`).join('');
     } else {
       const arr = TOOLS.filter(t => (group === 'all' || t.grp === group) && (!q || (t.name + ' ' + t.id + ' ' + t.desc + ' ' + t.grp).toLowerCase().includes(q)));
       grid.innerHTML = `<div class="home-grp">${arr.length} alat${q ? ` untuk “${esc(query.trim())}”` : ''}</div>` + (arr.length ? `<div class="home-grid">${arr.map(card).join('')}</div>` : `<div class="empty-note">😕 Tidak ada alat yang cocok. Coba kata kunci lain.</div>`);

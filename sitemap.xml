@@ -2,6 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>1.0</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/jwt/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/jwtgen/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/aes/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/hash/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/hashfile/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
@@ -20,6 +21,8 @@
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/jsoncsv/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/csvjson/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/jsonyaml/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/yamljson/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/jsonts/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/uuid/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/qr/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/qrdecode/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
