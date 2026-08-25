@@ -2,7 +2,7 @@
 
 # 🧰 DevSec Toolbox
 
-### 31 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
+### 34 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
 
 **[▶ Buka DevSec Toolbox](https://ksatriabintangsamudra.my.id/devsec/)**
 
@@ -14,13 +14,13 @@
 
 Kumpulan lengkap alat harian untuk **developer, analis, dan security enthusiast** — tanpa instal, tanpa login, **tanpa kirim data**. Tiap alat dilengkapi penjelasan **"untuk apa & kapan dipakai"** dan tombol **contoh**, sehingga pengunjung langsung paham tujuannya. Aman bahkan untuk token & secret sensitif karena semuanya diproses di perangkatmu.
 
-## 🧩 31 Alat, 5 Kategori
+## 🧩 34 Alat, 5 Kategori
 
 | Kategori | Alat |
 |---|---|
-| **🔐 Keamanan** | **JWT Decoder & Verify** (verifikasi tanda tangan HS256) · **Enkripsi AES-256-GCM** (PBKDF2) · Hash Teks (MD5/SHA-1/256/512) · **Hash File** · HMAC-SHA256 · Password Generator · **Cek Kekuatan Sandi** |
+| **🔐 Keamanan** | **JWT Decoder & Verify** (verifikasi tanda tangan HS256) · **JWT Generator** (buat & tanda tangani HS256) · **Enkripsi AES-256-GCM** (PBKDF2) · Hash Teks (MD5/SHA-1/256/512) · **Hash File** · HMAC-SHA256 · Password Generator · **Cek Kekuatan Sandi** |
 | **🔡 Encode / Decode** | Base64 (UTF-8 & URL-safe) · URL · HTML Entities · Escape String · **Data URI** (base64 gambar) |
-| **📦 Format & Data** | JSON Formatter · Regex Tester · **Diff Teks** · Konversi Basis Angka · **JSON → CSV** (siap Excel) · **CSV → JSON** · **JSON → YAML** |
+| **📦 Format & Data** | JSON Formatter · Regex Tester · **Diff Teks** · Konversi Basis Angka · **JSON → CSV** (siap Excel) · **CSV → JSON** · **JSON → YAML** · **YAML → JSON** · **JSON → TypeScript** |
 | **🎲 Generator** | UUID v4 · **QR Code** (unduh PNG) · **Baca QR dari gambar** (jsQR, tanpa unggah) · Lorem Ipsum · **Meta Tag & Open Graph** (+pratinjau Google) |
 | **🧭 Konversi** | Timestamp · **Cron Parser** (5 jadwal berikutnya) · URL Parser · Teks & Kasus · Warna (HEX/RGB/HSL) · **Konversi Unit** (panjang/massa/suhu/data) · **Kontras Warna WCAG** (AA/AAA) |
 
