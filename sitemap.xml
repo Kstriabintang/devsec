@@ -12,19 +12,24 @@
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/url/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/htmlent/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/escape/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/datauri/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/json/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/regex/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/diff/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/numbase/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/jsoncsv/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/csvjson/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/jsonyaml/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/uuid/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/qr/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/qrdecode/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/lorem/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/meta/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/timestamp/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/cron/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/urlparse/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/text/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/color/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://ksatriabintangsamudra.my.id/devsec/unit/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://ksatriabintangsamudra.my.id/devsec/contrast/</loc><lastmod>2026-08-25</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
 </urlset>

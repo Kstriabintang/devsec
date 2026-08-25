@@ -209,6 +209,38 @@ const TOOLS = [
     contoh(root) { $('#in', root).value = 'Baris 1\nBaris 2\t"kutip"'; fire($('#in', root)); },
     body(root) { let mode = 'escape'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="escape" class="on">Escape</button><button data-m="unescape">Unescape</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'escape' ? JSON.stringify(v).slice(1, -1) : JSON.parse('"' + v.replace(/"/g, '\\"') + '"')); } catch (e) { setErr(out, 'Tidak bisa di-unescape'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
 
+  { id: 'datauri', grp: 'Encode / Decode', e: '🖼️', name: 'Data URI (Base64 Gambar)', desc: 'Ubah gambar ↔ Data URI base64 untuk disematkan di HTML/CSS.',
+    tujuan: '<b>Untuk apa:</b> mengubah gambar kecil (ikon/logo) menjadi <b>Data URI</b> base64 agar bisa ditempel langsung di HTML/CSS tanpa file terpisah — hemat request. Bisa juga sebaliknya: menampilkan &amp; mengunduh gambar dari sebuah Data URI. <b>Kapan:</b> menyematkan ikon inline, atau memeriksa isi Data URI. Semua diproses lokal.',
+    body(root) {
+      let mode = 'encode';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Gambar → Data URI</button><button data-m="decode">Data URI → Gambar</button></div></div>
+        <div id="encbox"><div class="drop" id="drop"><div class="big">Jatuhkan gambar di sini</div><div>atau klik untuk memilih · ikon kecil ideal · tidak diunggah</div></div><input type="file" id="file" accept="image/*" style="display:none"></div>
+        <div id="decbox" style="display:none"><label class="lbl">Data URI</label><textarea id="din" placeholder="data:image/png;base64,iVBOR…"></textarea></div>
+        <div id="preview"></div>`;
+      const preview = $('#preview', root);
+      function showEncoded(dataUri, size) {
+        const kb = (size / 1024).toFixed(1), chars = dataUri.length;
+        preview.innerHTML = `<div class="uri-prev"><img alt="pratinjau"></div>
+          <div class="note">Ukuran asli ${kb} KB · Data URI ${chars.toLocaleString('id')} karakter${chars > 1e5 ? ' · <span class="pill warn">cukup besar untuk inline</span>' : ''}</div>
+          <label class="lbl" style="margin-top:12px">Data URI</label><div class="out" id="out2"></div>
+          <div class="row" style="margin-top:10px"><button class="btn sm" data-c="css" type="button">Salin CSS url()</button><button class="btn sm" data-c="img" type="button">Salin &lt;img&gt;</button></div>`;
+        preview.querySelector('.uri-prev img').src = dataUri;
+        const out = $('#out2', preview); out.textContent = dataUri; withCopy(out, () => dataUri);
+        preview.querySelector('[data-c=css]').addEventListener('click', () => copy(`background-image:url("${dataUri}");`));
+        preview.querySelector('[data-c=img]').addEventListener('click', () => copy(`<img src="${dataUri}" alt="">`));
+      }
+      const handleFile = f => { if (!f || !f.type.startsWith('image/')) { preview.innerHTML = '<span class="pill err">Bukan berkas gambar</span>'; return; } const r = new FileReader(); r.onload = () => showEncoded(r.result, f.size); r.readAsDataURL(f); };
+      const drop = $('#drop', root), file = $('#file', root);
+      drop.addEventListener('click', () => file.click());
+      file.addEventListener('change', e => handleFile(e.target.files[0]));
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
+      const decode = () => { const v = $('#din', root).value.trim(); if (!v) { preview.innerHTML = ''; return; } if (!/^data:image\//i.test(v)) { preview.innerHTML = '<span class="pill err">Harus diawali data:image/…</span>'; return; } preview.innerHTML = `<div class="uri-prev"><img alt="pratinjau"></div><div class="row" style="margin-top:10px"><button class="btn sm" id="dl" type="button">⭳ Unduh gambar</button></div>`; const img = preview.querySelector('.uri-prev img'); img.onerror = () => { const w = preview.querySelector('.uri-prev'); if (w) w.innerHTML = '<span class="pill err">Data URI tidak valid</span>'; }; img.src = v; const dl = $('#dl', preview); dl.addEventListener('click', () => { const a = document.createElement('a'); a.href = v; a.download = 'gambar'; a.click(); }); };
+      $('#din', root).addEventListener('input', decode);
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); $('#encbox', root).style.display = mode === 'encode' ? '' : 'none'; $('#decbox', root).style.display = mode === 'decode' ? '' : 'none'; preview.innerHTML = ''; });
+    } },
+
   // ---------- FORMAT & DATA ----------
   { id: 'json', grp: 'Format & Data', e: '📦', name: 'JSON Formatter', desc: 'Rapikan, minify, & validasi JSON dengan pesan error.',
     tujuan: '<b>Untuk apa:</b> merapikan JSON yang berantakan agar mudah dibaca, memadatkannya untuk produksi, dan mengecek apakah valid. <b>Kapan:</b> membaca respons API atau menyunting file konfigurasi.',
@@ -274,6 +306,46 @@ const TOOLS = [
       };
       $('#dl', root).addEventListener('click', () => { if (!lastCsv) return; const blob = new Blob(['﻿' + lastCsv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
       $('#in', root).addEventListener('input', run); $('#semi', root).addEventListener('change', run);
+    } },
+
+  { id: 'csvjson', grp: 'Format & Data', e: '🧾', name: 'CSV → JSON', desc: 'Ubah CSV (dengan header) menjadi array JSON objek.',
+    tujuan: '<b>Untuk apa:</b> mengubah data CSV (dari Excel/Sheets/ekspor) menjadi JSON array objek yang siap dipakai di kode/API. Parser menangani tanda kutip, koma di dalam sel, &amp; baris baru dalam sel (RFC 4180). <b>Kapan:</b> mengimpor data spreadsheet ke aplikasi.',
+    contoh(root) { $('#in', root).value = 'nama,umur,kota\nAndi,25,Yogyakarta\n"Budi, S.T.",30,Bandung'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">CSV</label><textarea id="in" style="min-height:150px" placeholder="a,b,c&#10;1,2,3"></textarea>
+        <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Pemisah</label><select class="f" id="sep" style="width:130px"><option value="auto">Deteksi otomatis</option><option value=",">Koma ,</option><option value=";">Titik-koma ;</option><option value="\t">Tab</option></select>
+        <label class="chk"><input type="checkbox" id="hdr" checked> Baris pertama = header</label><label class="chk"><input type="checkbox" id="typ" checked> Deteksi angka & boolean</label><span id="stat"></span></div>
+        <label class="lbl" style="margin-top:6px">JSON</label><div class="out empty" id="out">—</div>`;
+      const parseCSV = (text, sep) => { const rows = []; let row = [], f = '', i = 0, q = false; while (i < text.length) { const c = text[i]; if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i += 2; continue; } q = false; i++; continue; } f += c; i++; continue; } if (c === '"') { q = true; i++; continue; } if (c === sep) { row.push(f); f = ''; i++; continue; } if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; i++; continue; } if (c === '\r') { i++; continue; } f += c; i++; } if (f !== '' || row.length) { row.push(f); rows.push(row); } return rows; };
+      const coerce = v => { if (!$('#typ', root).checked) return v; const t = v.trim(); if (t === '') return ''; if (/^-?\d+(\.\d+)?$/.test(t) && t.length < 16) return Number(t); if (/^(true|false)$/i.test(t)) return t.toLowerCase() === 'true'; if (/^null$/i.test(t)) return null; return v; };
+      const run = () => {
+        const raw = $('#in', root).value, out = $('#out', root), stat = $('#stat', root); if (!raw.trim()) { out.textContent = '—'; out.classList.add('empty'); stat.innerHTML = ''; return; }
+        let sep = $('#sep', root).value; if (sep === 'auto') { const first = raw.split('\n')[0]; sep = [[',', (first.match(/,/g) || []).length], [';', (first.match(/;/g) || []).length], ['\t', (first.match(/\t/g) || []).length]].sort((a, b) => b[1] - a[1])[0][0]; }
+        const rows = parseCSV(raw.replace(/\n+$/, ''), sep); if (!rows.length) return setErr(out, 'CSV kosong');
+        let result;
+        if ($('#hdr', root).checked) { const keys = rows[0]; result = rows.slice(1).map(r => { const o = {}; keys.forEach((k, i) => o[k] = coerce(r[i] == null ? '' : r[i])); return o; }); }
+        else result = rows.map(r => r.map(coerce));
+        out.classList.remove('empty'); out.textContent = JSON.stringify(result, null, 2); withCopy(out, () => JSON.stringify(result, null, 2));
+        stat.innerHTML = `<span class="pill ok">${result.length} baris</span>`;
+      };
+      root.querySelectorAll('textarea,select,input').forEach(x => x.addEventListener('input', run)); $('#sep', root).addEventListener('change', run);
+    } },
+
+  { id: 'jsonyaml', grp: 'Format & Data', e: '🧩', name: 'JSON → YAML', desc: 'Ubah JSON menjadi YAML yang rapi & valid.',
+    tujuan: '<b>Untuk apa:</b> mengonversi JSON menjadi <b>YAML</b> — format konfigurasi yang lebih mudah dibaca (dipakai Docker Compose, Kubernetes, CI/CD, dsb). <b>Kapan:</b> menyalin data JSON ke file konfigurasi YAML. Berjalan di browser.',
+    contoh(root) { $('#in', root).value = '{"name":"devsec","version":3,"aktif":true,"tags":["dev","security"],"meta":{"author":"Ksatria","tools":26}}'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><label class="lbl" style="margin-top:12px">YAML</label><div class="out empty" id="out">—</div>`;
+      const scalar = v => { if (v === null) return 'null'; if (typeof v === 'boolean' || typeof v === 'number') return String(v); const s = String(v); if (s === '') return "''"; if (/[:#\[\]{}&*!|>'"%@`,]/.test(s) || /^[\s-?]/.test(s) || /\s$/.test(s) || /^(true|false|null|yes|no|on|off|~)$/i.test(s) || /^[-+]?[\d.]/.test(s) && /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return JSON.stringify(s); return s; };
+      const dump = (v, ind) => {
+        const pad = '  '.repeat(ind);
+        if (v === null || typeof v !== 'object') return scalar(v);
+        if (Array.isArray(v)) { if (!v.length) return '[]'; return '\n' + v.map(it => { if (it !== null && typeof it === 'object' && (Array.isArray(it) ? it.length : Object.keys(it).length)) { const block = dump(it, ind + 1).replace(/^\n/, ''); const lines = block.split('\n'); return pad + '- ' + lines[0].slice((ind + 1) * 2) + (lines.length > 1 ? '\n' + lines.slice(1).join('\n') : ''); } return pad + '- ' + dump(it, ind + 1); }).join('\n'); }
+        const keys = Object.keys(v); if (!keys.length) return '{}';
+        return '\n' + keys.map(k => { const val = v[k], key = scalar(k); if (val !== null && typeof val === 'object' && (Array.isArray(val) ? val.length : Object.keys(val).length)) return pad + key + ':' + dump(val, ind + 1); return pad + key + ': ' + dump(val, ind + 1); }).join('\n');
+      };
+      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); } const y = dump(data, 0).replace(/^\n/, ''); out.classList.remove('empty'); out.textContent = y || '(kosong)'; withCopy(out, () => y); };
+      $('#in', root).addEventListener('input', run);
     } },
 
   // ---------- GENERATOR ----------
@@ -354,6 +426,42 @@ const TOOLS = [
       $('#gen', root).addEventListener('click', run); run();
     } },
 
+  { id: 'meta', grp: 'Generator', e: '🔖', name: 'Meta Tag & Open Graph', desc: 'Buat tag SEO, Open Graph, & Twitter Card + pratinjau.',
+    tujuan: '<b>Untuk apa:</b> membuat tag <b>SEO</b> &amp; <b>social share</b> (Open Graph / Twitter Card) untuk &lt;head&gt; halaman — judul, deskripsi, dan gambar pratinjau saat tautan dibagikan. <b>Kapan:</b> menyiapkan halaman agar tampil rapi di Google &amp; media sosial.',
+    contoh(root) { $('#mt', root).value = 'DevSec Toolbox — Alat Developer & Keamanan'; $('#md', root).value = '31 alat developer & keamanan gratis, 100% di browser.'; $('#mu', root).value = 'https://ksatriabintangsamudra.my.id/devsec/'; $('#mi', root).value = 'https://ksatriabintangsamudra.my.id/devsec/docs/home.png'; $('#ms', root).value = 'DevSec Toolbox'; fire($('#mt', root)); },
+    body(root) {
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Judul</label><input class="f" id="mt" placeholder="Judul halaman"></div><div><label class="lbl">Nama situs</label><input class="f" id="ms" placeholder="Nama Situs"></div></div>
+        <label class="lbl" style="margin-top:12px">Deskripsi</label><textarea id="md" style="min-height:64px" placeholder="Deskripsi singkat (±155 karakter)"></textarea>
+        <div class="cardrow" style="margin-top:12px"><div><label class="lbl">URL</label><input class="f" id="mu" placeholder="https://…"></div><div><label class="lbl">Gambar / OG image (URL)</label><input class="f" id="mi" placeholder="https://…/og.png"></div></div>
+        <label class="lbl" style="margin-top:14px">Pratinjau Google</label><div id="gprev" class="serp"></div><div id="mcount" class="note"></div>
+        <label class="lbl" style="margin-top:12px">Tag untuk &lt;head&gt;</label><div class="out empty" id="out">—</div>`;
+      const gv = id => $('#' + id, root).value.trim();
+      const run = () => {
+        const t = gv('mt'), d = gv('md'), u = gv('mu'), img = gv('mi'), s = gv('ms'), out = $('#out', root), e = x => x.replace(/"/g, '&quot;');
+        if (!t && !d) { out.textContent = '—'; out.classList.add('empty'); $('#gprev', root).innerHTML = '<div class="serp-empty">Isi judul & deskripsi untuk melihat pratinjau…</div>'; $('#mcount', root).innerHTML = ''; return; }
+        const L = [];
+        if (t) L.push(`<title>${e(t)}</title>`);
+        if (d) L.push(`<meta name="description" content="${e(d)}">`);
+        if (u) L.push(`<link rel="canonical" href="${e(u)}">`);
+        L.push('<meta property="og:type" content="website">');
+        if (s) L.push(`<meta property="og:site_name" content="${e(s)}">`);
+        if (t) L.push(`<meta property="og:title" content="${e(t)}">`);
+        if (d) L.push(`<meta property="og:description" content="${e(d)}">`);
+        if (u) L.push(`<meta property="og:url" content="${e(u)}">`);
+        if (img) L.push(`<meta property="og:image" content="${e(img)}">`);
+        L.push(`<meta name="twitter:card" content="${img ? 'summary_large_image' : 'summary'}">`);
+        if (t) L.push(`<meta name="twitter:title" content="${e(t)}">`);
+        if (d) L.push(`<meta name="twitter:description" content="${e(d)}">`);
+        if (img) L.push(`<meta name="twitter:image" content="${e(img)}">`);
+        const text = L.join('\n'); setOut(out, text);
+        let host = u || 'contoh.com'; try { host = new URL(u).host + new URL(u).pathname.replace(/\/$/, ''); } catch (_) { }
+        const dlen = d.length;
+        $('#gprev', root).innerHTML = `<div class="serp-url">${esc(host)}</div><div class="serp-title">${esc(t || 'Judul halaman')}</div><div class="serp-desc">${esc((d || 'Deskripsi akan tampil di sini.').slice(0, 160))}${dlen > 160 ? '…' : ''}</div>`;
+        $('#mcount', root).innerHTML = `Judul ${t.length} · Deskripsi ${dlen} karakter ${dlen > 160 ? '<span class="pill warn">>160, mungkin terpotong</span>' : dlen && dlen < 70 ? '<span class="pill warn">agak pendek</span>' : dlen ? '<span class="pill ok">panjang ideal</span>' : ''}`;
+      };
+      root.querySelectorAll('input,textarea').forEach(x => x.addEventListener('input', run));
+    } },
+
   // ---------- KONVERSI ----------
   { id: 'timestamp', grp: 'Konversi', e: '⏱️', name: 'Timestamp', desc: 'Konversi Unix timestamp ↔ tanggal (lokal & UTC).',
     tujuan: '<b>Untuk apa:</b> menerjemahkan angka waktu Unix (detik sejak 1970) menjadi tanggal yang terbaca, dan sebaliknya. <b>Kapan:</b> membaca timestamp dari database, log, atau token (iat/exp).',
@@ -417,6 +525,25 @@ const TOOLS = [
       res.addEventListener('click', () => { if (res.textContent && res.textContent !== '—') copy(res.textContent); });
       fill(); run();
     } },
+
+  { id: 'contrast', grp: 'Konversi', e: '🌗', name: 'Kontras Warna (WCAG)', desc: 'Hitung rasio kontras dua warna & status lolos AA/AAA.',
+    tujuan: '<b>Untuk apa:</b> memastikan warna teks &amp; latar cukup <b>kontras</b> agar nyaman dibaca — sesuai standar aksesibilitas <b>WCAG</b>. Menampilkan rasio (mis. 4.5:1) &amp; lolos/gagal AA & AAA. <b>Kapan:</b> mendesain UI/web agar ramah semua pengguna.',
+    contoh(root) { $('#fg', root).value = '#0b1120'; $('#bg', root).value = '#5eead4'; fire($('#fg', root)); },
+    body(root) {
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Warna teks</label><div class="row"><input type="color" id="fgp" value="#111111" class="cpick"><input class="f" id="fg" value="#111111"></div></div>
+        <div><label class="lbl">Warna latar</label><div class="row"><input type="color" id="bgp" value="#ffffff" class="cpick"><input class="f" id="bg" value="#ffffff"></div></div></div>
+        <div id="cprev" class="contrast-prev"><b>Teks contoh</b> — Aa Bb Cc 0123456789</div>
+        <div id="out" style="margin-top:12px"></div>`;
+      const parse = s => { s = s.trim(); let m = s.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i); if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; } m = s.match(/rgba?\(([^)]+)\)/i); if (m) { const p = m[1].split(',').map(parseFloat); return [p[0], p[1], p[2]]; } return null; };
+      const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+      const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const run = () => { const fg = parse($('#fg', root).value), bg = parse($('#bg', root).value), out = $('#out', root); if (!fg || !bg || fg.some(isNaN) || bg.some(isNaN)) return setErr(out, 'Warna tidak valid (pakai #hex atau rgb())'); const L1 = lum(fg), L2 = lum(bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); const r = ratio.toFixed(2); const prev = $('#cprev', root); prev.style.color = `rgb(${fg.join(',')})`; prev.style.background = `rgb(${bg.join(',')})`; const b = ok => ok ? '<span class="pill ok">Lolos ✓</span>' : '<span class="pill err">Gagal ✕</span>'; out.innerHTML = `<div class="kv"><span class="k">Rasio kontras</span><span class="v"><b>${r} : 1</b></span></div><div class="kv"><span class="k">AA · teks normal (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div><div class="kv"><span class="k">AA · teks besar (≥ 3)</span><span class="v">${b(ratio >= 3)}</span></div><div class="kv"><span class="k">AAA · teks normal (≥ 7)</span><span class="v">${b(ratio >= 7)}</span></div><div class="kv"><span class="k">AAA · teks besar (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div>`; };
+      $('#fgp', root).addEventListener('input', e => { $('#fg', root).value = e.target.value; run(); });
+      $('#bgp', root).addEventListener('input', e => { $('#bg', root).value = e.target.value; run(); });
+      $('#fg', root).addEventListener('input', e => { const v = e.target.value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) $('#fgp', root).value = v; run(); });
+      $('#bg', root).addEventListener('input', e => { const v = e.target.value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) $('#bgp', root).value = v; run(); });
+      run();
+    } },
 ];
 
 const GROUPS = ['Keamanan', 'Encode / Decode', 'Format & Data', 'Generator', 'Konversi'];
@@ -435,7 +562,7 @@ function buildNav(filter = '') {
   for (const g of GROUPS) {
     const arr = TOOLS.filter(t => t.grp === g && (!f || (t.name + ' ' + t.id + ' ' + t.desc).toLowerCase().includes(f)));
     if (!arr.length) continue;
-    html += `<div class="grp">${g}</div>` + arr.map(tid).join('');
+    html += `<div class="grp">${g} <span class="grp-cnt">${arr.length}</span></div>` + arr.map(tid).join('');
   }
   nav.innerHTML = html;
   nav.querySelectorAll('.nlink').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); document.body.classList.remove('nav-open'); }));
@@ -453,23 +580,37 @@ function current() {
 }
 function setMeta(title, desc) { document.title = title; const md = document.querySelector('meta[name="description"]'); if (md && desc) md.setAttribute('content', desc); }
 
+const card = t => `<a class="hcard" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
 function renderHome() {
   runCleanup();
-  const grid = g => TOOLS.filter(t => t.grp === g).map(t => `<a class="hcard" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span><b>${t.name}</b><span>${esc(t.desc)}</span></span></a>`).join('');
   const root = $('#tool');
   $('#ttl').textContent = 'Beranda'; $('#desc').textContent = '';
+  const counts = Object.fromEntries(GROUPS.map(g => [g, TOOLS.filter(t => t.grp === g).length]));
   root.innerHTML = `<div class="home-hero">
+      <div class="home-eyebrow">🧰 ${TOOLS.length} alat · 100% di browser · gratis</div>
       <h2>Semua alat <span class="g">developer &amp; keamanan</span> dalam satu tempat.</h2>
-      <p>DevSec Toolbox adalah kumpulan ${TOOLS.length} alat yang sering dibutuhkan sehari-hari — dari decode JWT, enkripsi AES, hash, hingga QR &amp; regex. Semuanya berjalan <b>100% di dalam browser-mu</b>: tidak ada server, tidak ada login, dan <b>tidak ada data yang dikirim ke mana pun</b>. Aman dipakai bahkan untuk token &amp; secret sensitif.</p>
-      <div class="home-badges">
-        <span class="hb">🔒 <b>On-device</b> — nol jaringan</span>
-        <span class="hb">⚡ <b>Instan</b> — tanpa instal</span>
-        <span class="hb">✅ <b>Teruji</b> — vs nilai standar</span>
-        <span class="hb">🆓 <b>Gratis</b> — tanpa iklan</span>
-      </div>
+      <p>Dari decode JWT, enkripsi AES, hash &amp; HMAC, hingga QR, regex, konversi &amp; SEO — semuanya berjalan <b>di dalam browser-mu</b>, tanpa server dan tanpa mengirim data ke mana pun.</p>
+      <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="hsearch" type="text" placeholder="Cari alat… mis. jwt, hash, qr, warna, csv"><kbd>/</kbd></div>
+      <div class="home-badges"><span class="hb">🔒 <b>On-device</b></span><span class="hb">⚡ <b>Instan</b></span><span class="hb">✅ <b>Teruji</b></span><span class="hb">🆓 <b>Tanpa iklan</b></span></div>
     </div>
-    ${GROUPS.map(g => `<div class="home-grp">${g}</div><div class="home-grid">${grid(g)}</div>`).join('')}`;
-  root.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));
+    <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">Semua <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
+    <div id="hgrid"></div>`;
+  let group = 'all', query = '';
+  const grid = $('#hgrid', root);
+  const wire = () => grid.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));
+  const render = () => {
+    const q = query.toLowerCase().trim();
+    if (group === 'all' && !q) {
+      grid.innerHTML = GROUPS.map(g => `<div class="home-grp">${esc(g)} <span class="hg-cnt">${counts[g]}</span></div><div class="home-grid">${TOOLS.filter(t => t.grp === g).map(card).join('')}</div>`).join('');
+    } else {
+      const arr = TOOLS.filter(t => (group === 'all' || t.grp === group) && (!q || (t.name + ' ' + t.id + ' ' + t.desc + ' ' + t.grp).toLowerCase().includes(q)));
+      grid.innerHTML = `<div class="home-grp">${arr.length} alat${q ? ` untuk “${esc(query.trim())}”` : ''}</div>` + (arr.length ? `<div class="home-grid">${arr.map(card).join('')}</div>` : `<div class="empty-note">😕 Tidak ada alat yang cocok. Coba kata kunci lain.</div>`);
+    }
+    wire();
+  };
+  $('#hfilter', root).addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; group = b.dataset.g; [...$('#hfilter', root).children].forEach(c => c.classList.toggle('on', c === b)); render(); });
+  $('#hsearch', root).addEventListener('input', e => { query = e.target.value; render(); });
+  render();
   setMeta(HOME_TITLE, HOME_DESC);
   markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
@@ -492,6 +633,8 @@ function go(id, push) { if (push) { const u = urlFor(id); if (location.pathname 
 addEventListener('popstate', () => open(current()));
 $('#search').addEventListener('input', e => buildNav(e.target.value));
 $('#menutgl').addEventListener('click', () => document.body.classList.toggle('nav-open'));
+// tekan "/" untuk fokus ke pencarian (fokus ke cari-di-beranda jika ada, jika tidak ke sidebar)
+addEventListener('keydown', e => { if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); (document.getElementById('hsearch') || $('#search')).focus(); } });
 buildNav(); open(current());
 
 window.__DS = { tools: TOOLS.map(t => t.id), groups: GROUPS, get active() { return current(); }, open(id) { go(id, true); } };
