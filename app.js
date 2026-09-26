@@ -509,7 +509,7 @@ const TOOLS = [
 
   { id: 'meta', grp: 'Generator', e: '🔖', name: 'Meta Tag & Open Graph', desc: 'Buat tag SEO, Open Graph, & Twitter Card + pratinjau.',
     tujuan: '<b>Untuk apa:</b> membuat tag <b>SEO</b> &amp; <b>social share</b> (Open Graph / Twitter Card) untuk &lt;head&gt; halaman — judul, deskripsi, dan gambar pratinjau saat tautan dibagikan. <b>Kapan:</b> menyiapkan halaman agar tampil rapi di Google &amp; media sosial.',
-    contoh(root) { $('#mt', root).value = 'DevSec Toolbox — Alat Developer & Keamanan'; $('#md', root).value = '31 alat developer & keamanan gratis, 100% di browser.'; $('#mu', root).value = 'https://ksatriabintangsamudra.my.id/devsec/'; $('#mi', root).value = 'https://ksatriabintangsamudra.my.id/devsec/docs/home.png'; $('#ms', root).value = 'DevSec Toolbox'; fire($('#mt', root)); },
+    contoh(root) { $('#mt', root).value = 'DevSec Toolbox — Alat Developer & Keamanan'; $('#md', root).value = '31 alat developer & keamanan gratis, 100% di browser.'; $('#mu', root).value = 'https://devsec.ksatriabintangsamudra.com/'; $('#mi', root).value = 'https://devsec.ksatriabintangsamudra.com/docs/home.png'; $('#ms', root).value = 'DevSec Toolbox'; fire($('#mt', root)); },
     body(root) {
       root.innerHTML = `<div class="cardrow"><div><label class="lbl">Judul</label><input class="f" id="mt" placeholder="Judul halaman"></div><div><label class="lbl">Nama situs</label><input class="f" id="ms" placeholder="Nama Situs"></div></div>
         <label class="lbl" style="margin-top:12px">Deskripsi</label><textarea id="md" style="min-height:64px" placeholder="Deskripsi singkat (±155 karakter)"></textarea>

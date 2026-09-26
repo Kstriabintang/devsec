@@ -4,7 +4,7 @@
 
 ### 34 alat developer & keamanan — semuanya berjalan **100% di browser**, tanpa server.
 
-**[▶ Buka DevSec Toolbox](https://ksatriabintangsamudra.my.id/devsec/)**
+**[▶ Buka DevSec Toolbox](https://devsec.ksatriabintangsamudra.com/)**
 
 <img src="./docs/home.png" width="100%" alt="DevSec Toolbox — Beranda">
 
