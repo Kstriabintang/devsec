@@ -1103,6 +1103,215 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run);
     } },
 
+
+  // ================= PHASE 4: MORE SCANNERS (edge) + on-device security =================
+  { id: 'tls', grp: 'Scanners', e: '🔏', live: true, name: 'TLS / SSL Certificate', desc: 'Inspect a domain\'s certificates & expiry from CT logs.',
+    tujuan: '<b>What it\'s for:</b> inspect a domain\'s TLS/SSL certificates from public Certificate Transparency logs — issuer, validity dates, days until expiry, and the names (SANs) each cert covers. <b>When:</b> checking a cert is valid, not expiring soon, or spotting unexpected certs issued for your domain. <b>Live:</b> queried from this site\'s Cloudflare edge (CertSpotter / crt.sh).',
+    contoh(root) { $('#in', root).value = 'github.com'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><input class="f" id="in" placeholder="example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Inspect</button></div><div id="out" style="margin-top:14px"></div>`;
+      const fd = x => { try { return new Date(x).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return x; } };
+      const run = async () => {
+        const out = $('#out', root), btn = $('#scan', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Querying CT logs…</div>`;
+        try { const res = await fetch('/api/tls?domain=' + encodeURIComponent(v)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Lookup failed');
+          const days = d.daysLeft, dc = days == null ? 'info' : days < 0 ? 'err' : days < 15 ? 'err' : days < 30 ? 'warn' : 'ok';
+          const c0 = d.certs[0] || {};
+          let html = `<div class="row"><span class="pill ${dc}">${days == null ? '—' : days < 0 ? 'EXPIRED' : days + ' days left'}</span><span class="pill info">${d.total} certs in CT logs</span></div>`;
+          html += `<label class="lbl" style="margin-top:12px">Latest certificate</label><div class="kv"><span class="k">Issuer</span><span class="v">${esc(c0.issuer || '—')}</span></div><div class="kv"><span class="k">Valid from</span><span class="v">${esc(fd(c0.notBefore))}</span></div><div class="kv"><span class="k">Expires</span><span class="v">${esc(fd(c0.notAfter))}</span></div><div class="kv"><span class="k">Covers (SAN)</span><span class="v">${esc((c0.names || []).slice(0, 10).join(', '))}</span></div>`;
+          if (d.certs.length > 1) html += `<label class="lbl" style="margin-top:14px">Recent certificates <span class="hg-cnt">${d.certs.length}</span></label>` + d.certs.map(c => `<div class="kv"><span class="k">${esc(c.issuer || '—')}</span><span class="v">exp ${esc(fd(c.notAfter))}</span></div>`).join('');
+          out.innerHTML = html;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', run); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    } },
+
+  { id: 'ipinfo', grp: 'Scanners', e: '📍', live: true, name: 'IP Lookup', desc: 'Geolocate an IP/domain + ASN, org & reverse DNS.',
+    tujuan: '<b>What it\'s for:</b> look up an IP address (or a domain) — country, city, the owning organization &amp; ASN, and reverse DNS (PTR). <b>When:</b> investigating a suspicious IP from your logs, or checking where a host is. <b>Live:</b> resolved from this site\'s Cloudflare edge.',
+    contoh(root) { $('#in', root).value = '8.8.8.8'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><input class="f" id="in" placeholder="8.8.8.8 or example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Lookup</button></div><div id="out" style="margin-top:14px"></div>`;
+      const run = async () => {
+        const out = $('#out', root), btn = $('#scan', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Looking up…</div>`;
+        try { const res = await fetch('/api/ip?q=' + encodeURIComponent(v)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Lookup failed');
+          const row = (k, val) => val ? `<div class="kv"><span class="k">${k}</span><span class="v">${esc(val)}</span></div>` : '';
+          out.innerHTML = row('IP', d.ip) + row('Resolved from', d.resolvedFrom) + row('Reverse DNS', d.reverseDns) + row('Country', [d.city, d.region, d.country].filter(Boolean).join(', ')) + row('Organization', d.org) + row('ISP', d.isp && d.isp !== d.org ? d.isp : '') + row('ASN', d.asn ? d.asn + (d.asName ? ' · ' + d.asName : '') : '') + row('Coordinates', d.lat != null && d.lon != null ? d.lat + ', ' + d.lon : '') + (!d.country && !d.org ? '<div class="note">Geolocation unavailable for this address; reverse DNS shown above.</div>' : '');
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', run); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    } },
+
+  { id: 'whois', grp: 'Scanners', e: '📇', live: true, name: 'Domain WHOIS', desc: 'Registrar, dates, status & nameservers (via RDAP).',
+    tujuan: '<b>What it\'s for:</b> look up a domain\'s registration — registrar, creation / last-updated / expiry dates (with days left), EPP status codes, and nameservers. Uses modern <b>RDAP</b> (WHOIS over HTTPS). <b>When:</b> checking who owns a domain or when it expires. <b>Live:</b> resolved from this site\'s Cloudflare edge.',
+    contoh(root) { $('#in', root).value = 'github.com'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><input class="f" id="in" placeholder="example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Lookup</button></div><div id="out" style="margin-top:14px"></div>`;
+      const fd = x => { if (!x) return null; try { return new Date(x).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return x; } };
+      const run = async () => {
+        const out = $('#out', root), btn = $('#scan', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Querying RDAP…</div>`;
+        try { const res = await fetch('/api/whois?domain=' + encodeURIComponent(v)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Lookup failed');
+          let days = null; if (d.expires) days = Math.round((new Date(d.expires) - Date.now()) / 86400000);
+          const row = (k, val) => val ? `<div class="kv"><span class="k">${k}</span><span class="v">${esc(val)}</span></div>` : '';
+          let html = row('Domain', d.domain) + row('Registrar', d.registrar) + row('Registered', fd(d.created)) + row('Updated', fd(d.updated)) + row('Expires', d.expires ? fd(d.expires) + (days != null ? ' (' + days + ' days)' : '') : '');
+          if (d.status && d.status.length) html += `<label class="lbl" style="margin-top:12px">Status</label><div class="row">${d.status.map(s => `<span class="ars-tag">${esc(s)}</span>`).join('')}</div>`;
+          if (d.nameservers && d.nameservers.length) html += `<label class="lbl" style="margin-top:12px">Nameservers</label>` + d.nameservers.map(n => `<div class="out" style="min-height:0;padding:9px 12px;margin-bottom:6px">${esc(n)}</div>`).join('');
+          out.innerHTML = html;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', run); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    } },
+
+  { id: 'cors', grp: 'Scanners', e: '🔀', live: true, name: 'CORS Checker', desc: 'Test a site\'s CORS policy for misconfigurations.',
+    tujuan: '<b>What it\'s for:</b> check a URL\'s <b>CORS</b> policy by sending a cross-origin request and inspecting the response — it flags dangerous setups like reflecting any Origin together with credentials. <b>When:</b> auditing an API\'s cross-origin exposure. <b>Live:</b> a single request from this site\'s Cloudflare edge (internal addresses blocked). Passive — no exploitation.',
+    contoh(root) { $('#in', root).value = 'https://api.github.com'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><input class="f" id="in" placeholder="https://api.example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Check</button></div><div id="out" style="margin-top:14px"></div>`;
+      const run = async () => {
+        const out = $('#out', root), btn = $('#scan', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Testing CORS…</div>`;
+        try { const res = await fetch('/api/cors?url=' + encodeURIComponent(v)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Check failed');
+          const row = (k, val) => `<div class="kv"><span class="k">${k}</span><span class="v mono">${esc(val || '(not set)')}</span></div>`;
+          out.innerHTML = `<div class="row"><span class="pill ${d.state}">${d.state === 'ok' ? 'OK' : d.state === 'warn' ? 'Review' : 'Risk'}</span></div><div class="note" style="margin:8px 0 12px">${esc(d.verdict)}</div><label class="lbl">Response</label>${row('Access-Control-Allow-Origin', d.acao)}${row('Access-Control-Allow-Credentials', d.acac)}${row('Access-Control-Allow-Methods', d.acam)}<div class="note">Test Origin sent: <span class="mono">${esc(d.testOrigin)}</span></div>`;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', run); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    } },
+
+  { id: 'headersview', grp: 'Scanners', e: '📋', live: true, name: 'HTTP Header Viewer', desc: 'Fetch a URL and view all raw response headers.',
+    tujuan: '<b>What it\'s for:</b> fetch a URL and see <b>every</b> HTTP response header the server returns (status, server, cache, security, redirects…). <b>When:</b> debugging caching, CDN, redirects, or any header. <b>Live:</b> a single request from this site\'s Cloudflare edge (internal addresses blocked).',
+    contoh(root) { $('#in', root).value = 'https://example.com'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><input class="f" id="in" placeholder="https://example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Fetch</button></div><div id="out" style="margin-top:14px"></div>`;
+      const run = async () => {
+        const out = $('#out', root), btn = $('#scan', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Fetching…</div>`;
+        try { const res = await fetch('/api/rawheaders?url=' + encodeURIComponent(v)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Fetch failed');
+          const keys = Object.keys(d.headers).sort();
+          out.innerHTML = `<div class="row"><span class="pill ${d.status < 400 ? 'ok' : 'warn'}">HTTP ${d.status}</span><span class="pill info">${keys.length} headers</span></div><label class="lbl" style="margin-top:10px">Response headers</label>` + keys.map(k => `<div class="kv"><span class="k">${esc(k)}</span><span class="v mono">${esc(d.headers[k])}</span></div>`).join('');
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', run); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+    } },
+
+  { id: 'aiexplain', grp: 'Scanners', e: '🤖', live: true, name: 'AI Security Explainer', desc: 'Explain a CVE, header, or finding in plain English (AI).',
+    tujuan: '<b>What it\'s for:</b> paste a CVE ID, a security header, an error, or a scan finding and get a plain-English explanation — what it is, the risk, and how to fix it. Powered by <b>Cloudflare Workers AI</b> (Llama). <b>When:</b> you hit a finding you don\'t fully understand. <b>Live:</b> your prompt is sent to this site\'s Cloudflare edge to run the model. Defensive only — it won\'t write exploits.',
+    body(root) {
+      root.innerHTML = `<label class="lbl">Ask about a CVE, header, or security concept</label><textarea id="in" style="min-height:90px" placeholder="e.g. Explain CVE-2021-44228 (Log4Shell)"></textarea>
+        <div class="row" style="margin-top:8px">${['Explain CVE-2021-44228 (Log4Shell)', 'What is a Content-Security-Policy?', 'Why is SameSite cookie important?'].map(q => `<button class="btn sm" data-q="${esc(q)}" type="button">${esc(q.length > 34 ? q.slice(0, 32) + '…' : q)}</button>`).join('')}</div>
+        <div class="row" style="margin-top:8px"><button class="btn acc" id="ask" type="button">Explain</button></div><div id="out" style="margin-top:12px"></div>`;
+      const fmt = s => esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+      const run = async () => {
+        const out = $('#out', root), btn = $('#ask', root), v = $('#in', root).value.trim(); if (!v) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Thinking…</div>`;
+        try { const res = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: v }) }); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'AI failed');
+          out.innerHTML = `<div class="out" style="white-space:pre-wrap;line-height:1.7">${fmt(d.text || '(no response)')}</div><div class="note">AI-generated · verify important details. Powered by Cloudflare Workers AI.</div>`;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      root.querySelectorAll('[data-q]').forEach(b => b.addEventListener('click', () => { $('#in', root).value = b.dataset.q; run(); }));
+      $('#ask', root).addEventListener('click', run);
+    } },
+
+  { id: 'envcheck', grp: 'Security', e: '🗝️', name: '.env Auditor', desc: 'Audit a .env file for secrets, weak values & mistakes.',
+    tujuan: '<b>What it\'s for:</b> paste a <span class="mono">.env</span> file to catch secrets that should not be committed, weak or placeholder values, duplicate keys, and quoting mistakes. <b>When:</b> before committing config or sharing a project. Runs 100% on-device.',
+    contoh(root) { $('#in', root).value = 'NODE_ENV=production\nDB_PASSWORD=123456\nAPI_KEY=sk_live_' + 'abcdef1234567890abcdef\nDEBUG=true\nSECRET=\nDB_PASSWORD=admin\nJWT_SECRET=changeme'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">.env contents</label><textarea id="in" style="min-height:160px" placeholder="KEY=value"></textarea><div id="stat" style="margin-top:12px"></div><div id="out" style="margin-top:6px"></div>`;
+      const WEAK = ['123456', 'password', 'admin', 'changeme', 'secret', 'root', 'test', '12345678', 'qwerty', 'example', 'your_', 'xxx', 'todo'];
+      const SECRETISH = /(pass|pwd|secret|token|api[_-]?key|apikey|private|credential|access[_-]?key)/i;
+      const run = () => {
+        const text = $('#in', root).value, out = $('#out', root), stat = $('#stat', root);
+        if (!text.trim()) { stat.innerHTML = ''; out.innerHTML = ''; return; }
+        const finds = []; const seen = {};
+        text.split('\n').forEach((l, i) => {
+          const line = l.trim(); if (!line || line.startsWith('#')) return;
+          const m = line.match(/^([A-Za-z0-9_.]+)\s*=\s*(.*)$/); if (!m) { finds.push({ sev: 'warn', line: i + 1, msg: 'Line is not a valid KEY=value pair.' }); return; }
+          const k = m[1], val = m[2].replace(/^["']|["']$/g, '').trim();
+          if (seen[k]) finds.push({ sev: 'warn', line: i + 1, msg: `Duplicate key "${k}" (also on line ${seen[k]}).` }); else seen[k] = i + 1;
+          if (SECRETISH.test(k) && val) finds.push({ sev: 'high', line: i + 1, msg: `"${k}" holds a secret — never commit this to git (use a secret manager / .gitignore).` });
+          if (SECRETISH.test(k) && !val) finds.push({ sev: 'info', line: i + 1, msg: `"${k}" is empty — a placeholder to fill at deploy time.` });
+          if (val && WEAK.some(w => val.toLowerCase().includes(w))) finds.push({ sev: 'high', line: i + 1, msg: `"${k}" looks like a weak/placeholder value ("${val.slice(0, 20)}") — replace before production.` });
+          if (/\s/.test(m[2].trim()) && !/^["']/.test(m[2].trim())) finds.push({ sev: 'info', line: i + 1, msg: `"${k}" value contains spaces but is not quoted — may be truncated.` });
+        });
+        const order = { high: 0, warn: 1, info: 2 }; finds.sort((a, b) => order[a.sev] - order[b.sev] || a.line - b.line);
+        if (!finds.length) { stat.innerHTML = '<span class="pill ok">✓ No issues found</span>'; out.innerHTML = '<div class="note">Clean against the built-in checks. Ensure .env is in .gitignore.</div>'; return; }
+        const nH = finds.filter(f => f.sev === 'high').length, nW = finds.filter(f => f.sev === 'warn').length, nI = finds.filter(f => f.sev === 'info').length;
+        stat.innerHTML = `${nH ? `<span class="pill err">${nH} high</span> ` : ''}${nW ? `<span class="pill warn">${nW} warning</span> ` : ''}${nI ? `<span class="pill info">${nI} info</span>` : ''}`;
+        const pc = s => s === 'high' ? 'err' : s === 'warn' ? 'warn' : 'info';
+        out.innerHTML = finds.map(f => `<div class="kv"><span class="k"><span class="pill ${pc(f.sev)}">${f.sev}</span> line ${f.line}</span><span class="v" style="text-align:left;max-width:78%">${esc(f.msg)}</span></div>`).join('');
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'sqlcheck', grp: 'Security', e: '🛢️', name: 'SQL Safety Linter', desc: 'Flag SQL-injection-prone patterns in your own queries.',
+    tujuan: '<b>What it\'s for:</b> review <b>your own</b> SQL / query-building code for patterns that lead to SQL injection — string concatenation of user input, missing parameterization, dangerous functions, and risky clauses. <b>When:</b> code review before shipping. Educational &amp; defensive; runs 100% on-device. (This does not attack anything.)',
+    contoh(root) { $('#in', root).value = `query = "SELECT * FROM users WHERE name = '" + userName + "' AND pass = '" + pass + "'";\ndb.exec("DELETE FROM logs");\nEXEC('xp_cmdshell');`; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">SQL or query-building code</label><textarea id="in" style="min-height:150px" placeholder="paste SQL or code that builds SQL"></textarea><div id="stat" style="margin-top:12px"></div><div id="out" style="margin-top:6px"></div>`;
+      const RULES = [
+        { re: /["'`]\s*\+\s*\w|\w\s*\+\s*["'`]/, sev: 'high', msg: 'String concatenation to build SQL with a variable — the classic SQL-injection vector. Use parameterized queries / prepared statements.' },
+        { re: /\$\{[^}]+\}|%s|%d|\bf["']/i, sev: 'high', msg: 'Interpolating a variable directly into a query string. Bind parameters instead of formatting.' },
+        { re: /\bxp_cmdshell\b/i, sev: 'high', msg: 'xp_cmdshell runs OS commands from SQL — a major RCE risk. Disable it.' },
+        { re: /\bEXEC(UTE)?\s*\(/i, sev: 'warn', msg: 'Dynamic EXEC() of a string — if it includes user input, it is injectable. Prefer parameterized calls.' },
+        { re: /\bOR\s+1\s*=\s*1\b/i, sev: 'warn', msg: 'Tautology "OR 1=1" present — a common injection payload / logic bug.' },
+        { re: /\b(UPDATE|DELETE)\b(?![^;]*\bWHERE\b)/i, sev: 'warn', msg: 'UPDATE/DELETE without a WHERE clause affects every row.' },
+        { re: /--|\/\*/, sev: 'info', msg: 'SQL comment present — make sure it is not from concatenated user input (comment-based injection).' },
+        { re: /SELECT\s+\*/i, sev: 'info', msg: 'SELECT * — prefer explicit columns (avoids leaking columns & is faster).' },
+      ];
+      const run = () => {
+        const text = $('#in', root).value, out = $('#out', root), stat = $('#stat', root);
+        if (!text.trim()) { stat.innerHTML = ''; out.innerHTML = ''; return; }
+        const finds = [];
+        text.split('\n').forEach((l, i) => RULES.forEach(r => { if (r.re.test(l)) finds.push({ sev: r.sev, line: i + 1, msg: r.msg }); }));
+        const order = { high: 0, warn: 1, info: 2 }; finds.sort((a, b) => order[a.sev] - order[b.sev] || a.line - b.line);
+        if (!finds.length) { stat.innerHTML = '<span class="pill ok">✓ No risky patterns found</span>'; out.innerHTML = '<div class="note">Nothing matched the built-in rules. Still prefer parameterized queries everywhere.</div>'; return; }
+        const nH = finds.filter(f => f.sev === 'high').length, nW = finds.filter(f => f.sev === 'warn').length, nI = finds.filter(f => f.sev === 'info').length;
+        stat.innerHTML = `${nH ? `<span class="pill err">${nH} high</span> ` : ''}${nW ? `<span class="pill warn">${nW} warning</span> ` : ''}${nI ? `<span class="pill info">${nI} info</span>` : ''}`;
+        const pc = s => s === 'high' ? 'err' : s === 'warn' ? 'warn' : 'info';
+        out.innerHTML = finds.map(f => `<div class="kv"><span class="k"><span class="pill ${pc(f.sev)}">${f.sev}</span> line ${f.line}</span><span class="v" style="text-align:left;max-width:78%">${esc(f.msg)}</span></div>`).join('');
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'htmlcheck', grp: 'Security', e: '📑', name: 'HTML Security Checker', desc: 'Scan HTML for XSS-prone & accessibility issues.',
+    tujuan: '<b>What it\'s for:</b> scan an HTML snippet for security and quality issues — inline event handlers &amp; <span class="mono">javascript:</span> URLs (XSS), <span class="mono">target="_blank"</span> without <span class="mono">rel="noopener"</span> (tabnabbing), missing alt/lang, and inline eval. <b>When:</b> reviewing templates or user-generated HTML. Runs 100% on-device.',
+    contoh(root) { $('#in', root).value = '<a href="javascript:alert(1)" target="_blank">click</a>\n<img src="x.png">\n<button onclick="run()">go</button>\n<script>eval(data)</scr' + 'ipt>'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">HTML</label><textarea id="in" style="min-height:150px" placeholder="<html>…"></textarea><div id="stat" style="margin-top:12px"></div><div id="out" style="margin-top:6px"></div>`;
+      const LINE = [
+        { re: /\son\w+\s*=/i, sev: 'high', msg: 'Inline event handler (onclick/onerror/…) — an XSS sink. Move to addEventListener and sanitize data.' },
+        { re: /(href|src)\s*=\s*["']?\s*javascript:/i, sev: 'high', msg: 'javascript: URL — executes script, a classic XSS vector. Remove it.' },
+        { re: /\beval\s*\(|new\s+Function\s*\(|document\.write\s*\(|\.innerHTML\s*=/i, sev: 'warn', msg: 'Dynamic code / HTML injection sink (eval / Function / document.write / innerHTML). Validate & escape input.' },
+        { re: /target\s*=\s*["']_blank["'](?![^>]*rel\s*=\s*["'][^"']*noopener)/i, sev: 'warn', msg: 'target="_blank" without rel="noopener" — enables reverse-tabnabbing. Add rel="noopener noreferrer".' },
+        { re: /<img\b(?![^>]*\balt\s*=)/i, sev: 'info', msg: '<img> without alt — accessibility issue (and can hide injected content).' },
+      ];
+      const DOC = [
+        { test: t => /<html\b(?![^>]*\blang\s*=)/i.test(t), sev: 'info', msg: '<html> without a lang attribute — set it (e.g. lang="en").' },
+        { test: t => /<head\b/i.test(t) && !/name\s*=\s*["']viewport["']/i.test(t), sev: 'info', msg: 'No viewport meta — add it for responsive/mobile rendering.' },
+      ];
+      const run = () => {
+        const text = $('#in', root).value, out = $('#out', root), stat = $('#stat', root);
+        if (!text.trim()) { stat.innerHTML = ''; out.innerHTML = ''; return; }
+        const finds = [];
+        text.split('\n').forEach((l, i) => LINE.forEach(r => { if (r.re.test(l)) finds.push({ sev: r.sev, line: i + 1, msg: r.msg }); }));
+        DOC.forEach(r => { if (r.test(text)) finds.push({ sev: r.sev, line: '—', msg: r.msg }); });
+        const order = { high: 0, warn: 1, info: 2 }; finds.sort((a, b) => order[a.sev] - order[b.sev] || (a.line === '—' ? 999 : a.line) - (b.line === '—' ? 999 : b.line));
+        if (!finds.length) { stat.innerHTML = '<span class="pill ok">✓ No issues found</span>'; out.innerHTML = '<div class="note">Nothing matched the built-in rules.</div>'; return; }
+        const nH = finds.filter(f => f.sev === 'high').length, nW = finds.filter(f => f.sev === 'warn').length, nI = finds.filter(f => f.sev === 'info').length;
+        stat.innerHTML = `${nH ? `<span class="pill err">${nH} high</span> ` : ''}${nW ? `<span class="pill warn">${nW} warning</span> ` : ''}${nI ? `<span class="pill info">${nI} info</span>` : ''}`;
+        const pc = s => s === 'high' ? 'err' : s === 'warn' ? 'warn' : 'info';
+        out.innerHTML = finds.map(f => `<div class="kv"><span class="k"><span class="pill ${pc(f.sev)}">${f.sev}</span> ${f.line !== '—' ? 'line ' + f.line : 'doc'}</span><span class="v" style="text-align:left;max-width:78%">${esc(f.msg)}</span></div>`).join('');
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
 ];
 
 const GROUPS = ['Scanners', 'Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];

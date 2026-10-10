@@ -55,4 +55,13 @@
   <url><loc>https://devsec.ksatriabintangsamudra.com/webscan/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://devsec.ksatriabintangsamudra.com/dnsscan/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://devsec.ksatriabintangsamudra.com/dockerlint/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/tls/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/ipinfo/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/whois/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/cors/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/headersview/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/aiexplain/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/envcheck/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/sqlcheck/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://devsec.ksatriabintangsamudra.com/htmlcheck/</loc><lastmod>2026-10-10</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
 </urlset>

@@ -11,6 +11,7 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "devsec_stats", "database_id": "66b7671d-b632-47bb-88ab-9265c5872ef1" }
   ],
+  "ai": { "binding": "AI" },
   "routes": [
     { "pattern": "devsec.ksatriabintangsamudra.com", "custom_domain": true }
   ]

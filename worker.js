@@ -22,6 +22,12 @@ export default {
         if (p === '/api/sca' && request.method === 'POST') return await apiSca(request, env, ctx);
         if (p === '/api/headers') return await apiHeaders(url, env, ctx);
         if (p === '/api/dns') return await apiDns(url, env, ctx);
+        if (p === '/api/tls') return await apiTls(url, env, ctx);
+        if (p === '/api/ip') return await apiIp(url, env, ctx);
+        if (p === '/api/whois') return await apiWhois(url, env, ctx);
+        if (p === '/api/cors') return await apiCors(url, env, ctx);
+        if (p === '/api/rawheaders') return await apiRawHeaders(url, env, ctx);
+        if (p === '/api/ai' && request.method === 'POST') return await apiAi(request, env, ctx);
         if (p === '/api/stats') return await apiStats(env);
         return json({ error: 'Unknown endpoint' }, 404);
       } catch (e) {
@@ -35,8 +41,8 @@ export default {
 
 // ---------- helpers ----------
 async function bump(env, ctx, updates) {
-  // updates: { key: delta } on the stats table. Best-effort, non-blocking.
-  const stmts = Object.entries(updates).map(([k, d]) => env.DB.prepare('UPDATE stats SET v = v + ? WHERE k = ?').bind(d, k));
+  // updates: { key: delta } on the stats table. Upsert so new keys auto-create. Best-effort.
+  const stmts = Object.entries(updates).map(([k, d]) => env.DB.prepare('INSERT INTO stats (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = v + ?').bind(k, d, d));
   ctx.waitUntil(env.DB.batch(stmts).catch(() => {}));
 }
 async function bumpFindings(env, ctx, ids, kind) {
@@ -253,6 +259,167 @@ async function apiStats(env) {
     (f.results || []).forEach(r => top.push({ id: r.id, n: r.n }));
   } catch (e) { /* table may be empty */ }
   return json({ stats, top });
+}
+
+function cleanDomain(s) { s = (s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, ''); return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(s) ? s : ''; }
+
+// ======================= TLS / certificate transparency =======================
+const UA = { 'user-agent': 'Mozilla/5.0 (compatible; DevSecToolbox/1.0; +https://devsec.ksatriabintangsamudra.com)' };
+async function certSpotter(domain) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 11000);
+  const r = await fetch('https://api.certspotter.com/v1/issuances?domain=' + encodeURIComponent(domain) + '&expand=dns_names&expand=issuer', { headers: UA, signal: ctl.signal });
+  clearTimeout(t); if (!r.ok) throw new Error('certspotter ' + r.status);
+  const arr = await r.json(); if (!Array.isArray(arr)) throw new Error('bad certspotter data');
+  return arr.map(c => ({ issuer: ((c.issuer && c.issuer.name) || '').match(/O=([^,]+)/)?.[1] || (c.issuer && c.issuer.name) || '', notBefore: c.not_before, notAfter: c.not_after, names: c.dns_names || [], id: c.id }));
+}
+async function crtSh(domain) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 11000);
+  const r = await fetch('https://crt.sh/?q=' + encodeURIComponent(domain) + '&output=json', { headers: UA, signal: ctl.signal });
+  clearTimeout(t); if (!r.ok) throw new Error('crt.sh ' + r.status);
+  const arr = await r.json(); if (!Array.isArray(arr)) throw new Error('bad crt.sh data');
+  const seen = new Set(); const out = [];
+  for (const c of arr) { const k = c.serial_number || (c.issuer_name + c.not_before); if (seen.has(k)) continue; seen.add(k); out.push({ issuer: (c.issuer_name || '').match(/O=([^,]+)/)?.[1] || (c.issuer_name || ''), notBefore: c.not_before, notAfter: c.not_after, names: [...new Set((c.name_value || '').split('\n'))], id: c.id }); }
+  return out;
+}
+async function apiTls(url, env, ctx) {
+  const domain = cleanDomain(url.searchParams.get('domain'));
+  if (!domain) return json({ error: 'Provide a valid ?domain=' }, 400);
+  const ck = 'tls:' + domain; const hit = await env.CACHE.get(ck);
+  if (hit) return new Response(hit, { headers: { ...JSON_HEADERS, 'x-cache': 'HIT' } });
+  let all;
+  try { all = await certSpotter(domain); } catch (e1) { try { all = await crtSh(domain); } catch (e2) { return json({ error: 'Certificate lookup failed (CT log sources unavailable): ' + e2.message }, 502); } }
+  if (!all.length) return json({ error: 'No certificates found in CT logs for this domain.' }, 404);
+  all.sort((a, b) => new Date(b.notAfter) - new Date(a.notAfter));
+  const certs = all.slice(0, 8).map(c => ({ issuer: String(c.issuer).slice(0, 70), notBefore: c.notBefore, notAfter: c.notAfter, names: (c.names || []).slice(0, 15), id: c.id }));
+  const latest = certs[0];
+  const daysLeft = latest ? Math.round((new Date(latest.notAfter) - Date.now()) / 86400000) : null;
+  const resp = { domain, total: all.length, latestExpiry: latest ? latest.notAfter : null, daysLeft, certs };
+  ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(resp), { expirationTtl: 3600 }));
+  await bump(env, ctx, { scans_tls: 1 });
+  return new Response(JSON.stringify(resp), { headers: { ...JSON_HEADERS, 'x-cache': 'MISS' } });
+}
+
+// ======================= IP info + reverse DNS =======================
+async function apiIp(url, env, ctx) {
+  let q = (url.searchParams.get('q') || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  if (!q) return json({ error: 'Provide ?q= (IP or domain)' }, 400);
+  let ip = q, resolvedFrom = null;
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(q) && !q.includes(':')) {
+    const a = await doh(q, 'A'); if (!a.answers.length) return json({ error: 'Could not resolve that domain to an IP.' }, 404);
+    ip = a.answers[0].data; resolvedFrom = q;
+  }
+  const ck = 'ipv2:' + ip; const hit = await env.CACHE.get(ck);
+  if (hit) { const o = JSON.parse(hit); o.resolvedFrom = resolvedFrom; return json(o); }
+  let info = {};
+  try { const r = await fetch('https://ip.guide/' + encodeURIComponent(ip), { headers: UA }); if (r.ok) { const j = await r.json(); if (j && (j.location || j.network)) { const as = (j.network && j.network.autonomous_system) || {}; const lo = j.location || {}; info = { country: lo.country, country_code: lo.country_code, region: lo.region, city: lo.city, latitude: lo.latitude, longitude: lo.longitude, connection: { asn: as.asn, org: as.organization || as.name, isp: as.organization || as.name } }; } } } catch (e) {}
+  if (!info.country) { try { const r = await fetch('https://ipinfo.io/' + encodeURIComponent(ip) + '/json', { headers: UA }); if (r.ok) { const j = await r.json(); if (j && !j.error && j.country) { const m = (j.org || '').match(/^(AS\d+)\s*(.*)$/); const loc = (j.loc || '').split(','); info = { country: j.country, country_code: j.country, region: j.region, city: j.city, latitude: loc[0], longitude: loc[1], connection: { asn: m ? m[1] : null, org: m ? m[2] : (j.org || null), isp: m ? m[2] : (j.org || null) } }; } } } catch (e) {} }
+  let ptr = null;
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) { const rev = ip.split('.').reverse().join('.') + '.in-addr.arpa'; const pr = await doh(rev, 'PTR'); ptr = pr.answers.map(x => x.data).join(', ') || null; }
+  const cx = info.connection || {};
+  const resp = {
+    ip, resolvedFrom, reverseDns: ptr,
+    country: info.country || null, countryCode: info.country_code || null, city: info.city || null, region: info.region || null,
+    org: cx.org || cx.isp || null, isp: cx.isp || null, asn: cx.asn ? ('AS' + String(cx.asn).replace(/^AS/i, '')) : null,
+    lat: (info.latitude ?? null), lon: (info.longitude ?? null)
+  };
+  if (resp.country || resp.org || resp.reverseDns) ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(resp), { expirationTtl: 86400 }));
+  await bump(env, ctx, { scans_ip: 1 });
+  return json(resp);
+}
+
+// ======================= WHOIS via RDAP (IANA bootstrap) =======================
+async function rdapBase(env, tld) {
+  let map = await env.CACHE.get('rdap_bootstrap', 'json');
+  if (!map) {
+    const r = await fetch('https://data.iana.org/rdap/dns.json', { headers: UA });
+    if (!r.ok) throw new Error('bootstrap ' + r.status);
+    const d = await r.json(); map = {};
+    (d.services || []).forEach(([tlds, urls]) => tlds.forEach(t => { map[t] = (urls[0] || '').replace(/\/?$/, '/'); }));
+    await env.CACHE.put('rdap_bootstrap', JSON.stringify(map), { expirationTtl: 604800 });
+  }
+  return map[tld];
+}
+async function apiWhois(url, env, ctx) {
+  const domain = cleanDomain(url.searchParams.get('domain'));
+  if (!domain) return json({ error: 'Provide a valid ?domain=' }, 400);
+  const ck = 'whois:' + domain; const hit = await env.CACHE.get(ck);
+  if (hit) return new Response(hit, { headers: { ...JSON_HEADERS, 'x-cache': 'HIT' } });
+  const tld = domain.split('.').pop();
+  let base; try { base = await rdapBase(env, tld); } catch (e) {}
+  if (!base) return json({ error: 'No RDAP (WHOIS-over-HTTPS) service is published for .' + tld + '.' }, 404);
+  let d;
+  try {
+    const r = await fetch(base + 'domain/' + encodeURIComponent(domain), { headers: { accept: 'application/rdap+json', ...UA }, redirect: 'follow' });
+    if (r.status === 404) return json({ error: 'Domain not found (or not registered).' }, 404);
+    if (!r.ok) throw new Error('RDAP ' + r.status); d = await r.json();
+  } catch (e) { return json({ error: 'WHOIS/RDAP lookup failed: ' + e.message }, 502); }
+  const ev = {}; (d.events || []).forEach(e => ev[e.eventAction] = e.eventDate);
+  let registrar = ''; (d.entities || []).forEach(en => { if ((en.roles || []).includes('registrar')) { const vc = (en.vcardArray && en.vcardArray[1]) || []; const fn = vc.find(x => x[0] === 'fn'); registrar = fn ? fn[3] : (en.handle || ''); } });
+  const resp = {
+    domain: d.ldhName || domain, registrar: registrar || null,
+    created: ev.registration || null, updated: ev['last changed'] || null, expires: ev.expiration || null,
+    status: d.status || [], nameservers: (d.nameservers || []).map(n => n.ldhName).filter(Boolean)
+  };
+  ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(resp), { expirationTtl: 86400 }));
+  await bump(env, ctx, { scans_whois: 1 });
+  return new Response(JSON.stringify(resp), { headers: { ...JSON_HEADERS, 'x-cache': 'MISS' } });
+}
+
+// ======================= CORS checker (passive) =======================
+async function apiCors(url, env, ctx) {
+  let target = (url.searchParams.get('url') || '').trim();
+  if (!target) return json({ error: 'Provide ?url=' }, 400);
+  if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
+  let u; try { u = new URL(target); } catch { return json({ error: 'Invalid URL' }, 400); }
+  if (isBlockedHost(u.hostname)) return json({ error: 'Target host is not allowed (private/internal address).' }, 403);
+  const testOrigin = 'https://evil.devsec-test.example';
+  let res;
+  try { const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 9000); res = await fetch(u.href, { method: 'GET', redirect: 'follow', signal: ctl.signal, headers: { origin: testOrigin, 'user-agent': 'DevSecToolbox-Scanner/1.0' } }); clearTimeout(t); }
+  catch (e) { return json({ error: 'Could not reach the site: ' + (e.message || 'fetch failed') }, 502); }
+  const acao = res.headers.get('access-control-allow-origin') || '';
+  const acac = res.headers.get('access-control-allow-credentials') || '';
+  const acam = res.headers.get('access-control-allow-methods') || '';
+  const reflects = acao === testOrigin, wildcard = acao === '*', creds = /true/i.test(acac);
+  let verdict, state;
+  if (!acao) { verdict = 'No CORS headers — cross-origin reads are blocked by browsers by default (safe).'; state = 'ok'; }
+  else if (reflects && creds) { verdict = 'Dangerous — reflects an arbitrary Origin AND allows credentials. Any site could read authenticated responses.'; state = 'err'; }
+  else if (wildcard && creds) { verdict = 'Misconfigured — wildcard with credentials (browsers reject this combo, but it signals a mistake).'; state = 'err'; }
+  else if (reflects) { verdict = 'Permissive — reflects any Origin (no credentials). OK for public data, risky for anything private.'; state = 'warn'; }
+  else if (wildcard) { verdict = 'Open — Access-Control-Allow-Origin: * (public to any origin, no credentials).'; state = 'warn'; }
+  else { verdict = 'Restricted to a specific origin: ' + acao; state = 'ok'; }
+  await bump(env, ctx, { scans_cors: 1 });
+  return json({ url: u.href, acao: acao || null, acac: acac || null, acam: acam || null, testOrigin, state, verdict });
+}
+
+// ======================= raw HTTP response headers =======================
+async function apiRawHeaders(url, env, ctx) {
+  let target = (url.searchParams.get('url') || '').trim();
+  if (!target) return json({ error: 'Provide ?url=' }, 400);
+  if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
+  let u; try { u = new URL(target); } catch { return json({ error: 'Invalid URL' }, 400); }
+  if (isBlockedHost(u.hostname)) return json({ error: 'Target host is not allowed (private/internal address).' }, 403);
+  let res;
+  try { const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 9000); res = await fetch(u.href, { method: 'GET', redirect: 'manual', signal: ctl.signal, headers: { 'user-agent': 'DevSecToolbox-Scanner/1.0' } }); clearTimeout(t); }
+  catch (e) { return json({ error: 'Could not reach the site: ' + (e.message || 'fetch failed') }, 502); }
+  const headers = {}; res.headers.forEach((v, k) => headers[k] = v);
+  await bump(env, ctx, { scans_rawheaders: 1 });
+  return json({ url: u.href, status: res.status, headers });
+}
+
+// ======================= AI explainer (Workers AI) =======================
+async function apiAi(request, env, ctx) {
+  const body = await request.json().catch(() => null);
+  const q = body && typeof body.prompt === 'string' ? body.prompt.trim().slice(0, 1000) : '';
+  if (!q) return json({ error: 'Send { prompt }' }, 400);
+  if (!env.AI) return json({ error: 'AI is not enabled on this deployment.' }, 503);
+  const sys = 'You are a concise security assistant for developers. Explain the given CVE, vulnerability, security header, scan finding, or security term in plain English: what it is, why it matters (risk/impact), and how to fix or mitigate it. Use short paragraphs and bullet points. Be accurate and strictly DEFENSIVE — never provide working exploit code, attack payloads, or step-by-step instructions to attack a system. If asked to attack a target or write an exploit, refuse and give defensive guidance instead.';
+  let out = '';
+  try {
+    const r = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', { messages: [{ role: 'system', content: sys }, { role: 'user', content: q }], max_tokens: 512 });
+    out = (r && (r.response || r.result)) || '';
+  } catch (e) { return json({ error: 'AI error: ' + (e.message || e) }, 502); }
+  await bump(env, ctx, { ai_explains: 1 });
+  return json({ text: out });
 }
 
 // ---------- sha1 (cache keys) ----------
