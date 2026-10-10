@@ -1,9 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "devsec",
+  "main": "worker.js",
   "compatibility_date": "2026-09-25",
   "observability": { "enabled": true },
-  "assets": { "directory": "." },
+  "assets": { "directory": ".", "binding": "ASSETS" },
+  "kv_namespaces": [
+    { "binding": "CACHE", "id": "0ecc660ab6b6446fb4997d578e5ffd40" }
+  ],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "devsec_stats", "database_id": "66b7671d-b632-47bb-88ab-9265c5872ef1" }
+  ],
   "routes": [
     { "pattern": "devsec.ksatriabintangsamudra.com", "custom_domain": true }
   ]

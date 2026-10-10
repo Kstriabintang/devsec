@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const BASE = 'https://devsec.ksatriabintangsamudra.com';
-const VER = 'v11';
+const VER = 'v13';
 const GSV = 'ZlDKMH0Zt-Piim2iJGkBhoYrzPu76yamyCvyOlsnF5c'; // Google Search Console
 const THEME = '#080b12';
 const OG = `${BASE}/docs/home.png`;
@@ -22,13 +22,13 @@ const OG = `${BASE}/docs/home.png`;
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // --- group order + CSS slugs (must match app.js GROUPS/SLUG) ---
-const GROUPS = ['Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];
-const SLUG = { 'Security': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Converters': 'konversi' };
+const GROUPS = ['Scanners', 'Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];
+const SLUG = { 'Scanners': 'scanners', 'Security': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Converters': 'konversi' };
 
 // --- extract tool metadata from app.js (id, grp, emoji, name, desc) ---
 function extractTools() {
   const src = readFileSync(join(ROOT, 'app.js'), 'utf8');
-  const re = /\{\s*id:\s*'([^']+)',\s*grp:\s*'([^']+)',\s*e:\s*'((?:\\'|[^'])*)',\s*name:\s*'((?:\\'|[^'])*)',\s*desc:\s*'((?:\\'|[^'])*)'/g;
+  const re = /\{\s*id:\s*'([^']+)',\s*grp:\s*'([^']+)',\s*e:\s*'((?:\\'|[^'])*)',\s*(?:live:\s*true,\s*)?name:\s*'((?:\\'|[^'])*)',\s*desc:\s*'((?:\\'|[^'])*)'/g;
   const out = []; let m;
   const unq = s => s.replace(/\\'/g, "'");
   while ((m = re.exec(src)) !== null) out.push({ id: m[1], grp: unq(m[2]), e: unq(m[3]), name: unq(m[4]), desc: unq(m[5]) });

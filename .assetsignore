@@ -4,3 +4,5 @@ wrangler.jsonc
 .assetsignore
 README.md
 build.mjs
+worker.js
+schema.sql

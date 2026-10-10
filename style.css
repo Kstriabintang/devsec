@@ -312,6 +312,23 @@ mark{background:rgba(124,156,255,.34);color:#fff;border-radius:3px;padding:0 2px
 .ars-run[data-r="CLI"]{color:var(--tx2);background:var(--panel3);border:1px solid var(--line2)}
 .ars-legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:14px 0 2px;font-size:11.5px;color:var(--tx3)}
 
+/* ===== Scanners group + "Live · edge" badge ===== */
+.gdot[data-grp=scanners]{background:#38bdf8;box-shadow:0 0 8px rgba(56,189,248,.55)}
+.hcard[data-grp=scanners] .e{background:rgba(56,189,248,.14);border-color:rgba(56,189,248,.34)}
+.hc-live{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#38bdf8;background:rgba(56,189,248,.14);border:1px solid rgba(56,189,248,.4);border-radius:5px;padding:1px 5px;margin-left:7px;vertical-align:middle;line-height:1.6}
+.topbar .priv.live{color:var(--warn);border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.08)}
+.topbar .priv.live svg{color:var(--warn)}
+/* dependency-scan results */
+.scapkg{margin:16px 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scapkg b{font-size:14px}
+.scavuln{border-left:2px solid var(--line2);padding:7px 0 7px 12px;margin:0 0 8px 4px}
+/* live edge stats on home */
+.home-stats{margin-top:16px;font-size:12.5px;color:var(--tx3);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.home-stats:empty{display:none}
+.home-stats b{color:var(--acc);font-weight:700}
+.hs-dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);flex:none;animation:hsPulse 2s infinite}
+@keyframes hsPulse{0%,100%{opacity:1}50%{opacity:.35}}
+
 /* ===== MOBILE ===== */
 .menutgl{display:none}
 @media (max-width:760px){

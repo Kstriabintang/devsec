@@ -966,9 +966,146 @@ const TOOLS = [
       $('#in', root).addEventListener('input', e => run(e.target.value)); $('#pick', root).addEventListener('input', e => { $('#in', root).value = e.target.value; run(e.target.value); }); run('#02aab0');
     } },
 
+
+  // ================= PHASE 3: LIVE SCANNERS (Cloudflare Worker-powered) =================
+  { id: 'scadep', grp: 'Scanners', e: '🔍', live: true, name: 'Dependency Vuln Scanner', desc: 'Scan a lockfile for known CVEs via the OSV.dev database.',
+    tujuan: '<b>What it\'s for:</b> paste a dependency manifest (package-lock.json, package.json, requirements.txt, go.mod, Gemfile.lock, or composer.json) and find <b>known vulnerabilities</b> in your dependencies, with severity and the version that fixes them. Like the core of Trivy / OSV-Scanner. <b>When:</b> auditing a project before shipping. <b>Live:</b> the parsed package list is sent to this site\'s Cloudflare edge, which queries the public OSV.dev database (your code never leaves the browser — only package names + versions).',
+    contoh(root) { $('#in', root).value = '{\n  "dependencies": {\n    "lodash": "4.17.4",\n    "express": "4.17.1",\n    "axios": "0.21.0",\n    "minimist": "1.2.0"\n  }\n}'; },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Dependency manifest</label><textarea id="in" style="min-height:170px" placeholder="paste package-lock.json / package.json / requirements.txt / go.mod / Gemfile.lock / composer.json"></textarea>
+        <div class="row" style="margin-top:10px"><button class="btn acc" id="scan" type="button">Scan dependencies</button><span id="stat"></span></div>
+        <div id="out" style="margin-top:12px"></div>`;
+      const clean = r => (String(r).match(/\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?/) || [])[0];
+      const parseManifest = text => {
+        text = text.trim(); const q = [];
+        const add = (n, v, eco) => { if (n && v) q.push({ package: { name: n.trim(), ecosystem: eco }, version: String(v).replace(/^v/, '').trim() }); };
+        if (text[0] === '{') {
+          let j; try { j = JSON.parse(text); } catch { j = null; }
+          if (j) {
+            if (j.packages && typeof j.packages === 'object') for (const [k, v] of Object.entries(j.packages)) { const nm = k.split('node_modules/').pop(); if (nm && v && v.version) add(nm, v.version, 'npm'); }
+            if (!q.length && j.dependencies && Object.values(j.dependencies)[0] && Object.values(j.dependencies)[0].version) { const walk = d => { for (const [nm, v] of Object.entries(d)) { if (v && v.version) add(nm, v.version, 'npm'); if (v && v.dependencies) walk(v.dependencies); } }; walk(j.dependencies); }
+            if (!q.length && (j.dependencies || j.devDependencies)) for (const g of ['dependencies', 'devDependencies']) if (j[g]) for (const [nm, r] of Object.entries(j[g])) { const vv = clean(r); if (vv) add(nm, vv, 'npm'); }
+            if (!q.length && (j.require || j['require-dev'])) for (const g of ['require', 'require-dev']) if (j[g]) for (const [nm, r] of Object.entries(j[g])) { if (nm === 'php' || nm.startsWith('ext-')) continue; const vv = clean(r); if (vv) add(nm, vv, 'Packagist'); }
+            return q;
+          }
+        }
+        const lines = text.split('\n');
+        lines.forEach(l => { const m = l.match(/^\s*([a-zA-Z0-9._-]+)\s*==\s*([\w.]+)/); if (m) add(m[1], m[2], 'PyPI'); });
+        if (q.length) return q;
+        if (/^\s*(module|require|go)\s/m.test(text)) { lines.forEach(l => { const m = l.match(/^\s*(?:require\s+)?([\w.-]+(?:\/[\w.-]+)+)\s+v(\d+\.\d+\.\d+(?:[-+][\w.]+)?)/); if (m) add(m[1], m[2], 'Go'); }); if (q.length) return q; }
+        lines.forEach(l => { const m = l.match(/^\s{4}([\w-]+) \(([\d.]+)\)/); if (m) add(m[1], m[2], 'RubyGems'); });
+        return q;
+      };
+      const sevPill = v => { const s = v.severity || (v.score ? (v.score >= 9 ? 'Critical' : v.score >= 7 ? 'High' : v.score >= 4 ? 'Medium' : 'Low') : ''); const cls = /crit|high/i.test(s) ? 'err' : /med/i.test(s) ? 'warn' : s ? 'info' : ''; return s ? `<span class="pill ${cls}">${esc(s)}${v.score ? ' ' + v.score : ''}</span>` : '<span class="pill info">Unknown</span>'; };
+      const scan = async () => {
+        const out = $('#out', root), stat = $('#stat', root), btn = $('#scan', root);
+        const queries = parseManifest($('#in', root).value);
+        if (!queries.length) { stat.innerHTML = ''; return setErr(out, 'Could not detect any dependencies. Supported: package-lock.json, package.json, requirements.txt, go.mod, Gemfile.lock, composer.json.'); }
+        stat.innerHTML = `<span class="pill info">${queries.length} packages</span>`;
+        btn.classList.add('loading'); prog.start(true);
+        out.innerHTML = `<div class="proc"><span class="spinner"></span>Querying OSV.dev for ${queries.length} packages…</div>`;
+        try {
+          const res = await fetch('/api/sca', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ queries }) });
+          const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Scan failed');
+          if (!d.results.length) { out.innerHTML = `<div class="row"><span class="pill ok">✓ No known vulnerabilities</span><span class="pill info">${d.scanned} packages scanned</span></div><div class="note">Clean against the OSV.dev database right now. Keep dependencies updated.</div>`; return; }
+          let html = `<div class="row"><span class="pill info">${d.scanned} scanned</span><span class="pill err">${d.vulnerable} vulnerable</span><span class="pill warn">${d.vulns} vulnerabilities</span></div>`;
+          html += d.results.map(r => `<div class="scapkg"><b>${esc(r.name)}</b> <span class="mono" style="color:var(--tx3)">${esc(r.version)}</span> <span class="ars-tag">${esc(r.ecosystem)}</span></div>` +
+            r.vulns.map(v => { const url = v.cve && /^CVE-/.test(v.cve) ? 'https://osv.dev/vulnerability/' + v.id : 'https://osv.dev/vulnerability/' + v.id; return `<div class="scavuln"><div class="row" style="margin:0;gap:8px;align-items:center">${sevPill(v)}<a href="${url}" target="_blank" rel="noopener" class="mono" style="color:var(--acc);text-decoration:none">${esc(v.cve || v.id)}</a>${v.fixed ? `<span class="pill ok">fix: ${esc(v.fixed)}</span>` : ''}</div>${v.summary ? `<div class="note" style="margin-top:5px">${esc(v.summary)}</div>` : ''}</div>`; }).join('')).join('');
+          out.innerHTML = html;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', scan);
+    } },
+
+  { id: 'webscan', grp: 'Scanners', e: '🛡️', live: true, name: 'Website Security Scanner', desc: 'Grade a live site\'s security headers, HTTPS & cookies.',
+    tujuan: '<b>What it\'s for:</b> enter a URL and get a graded report of a <b>live website\'s</b> security headers (HSTS, CSP, X-Frame-Options…), HTTPS, redirects, and cookie flags. Like securityheaders.com / Mozilla Observatory. <b>When:</b> hardening or auditing a site. <b>Live:</b> the request is made from this site\'s Cloudflare edge (internal/private addresses are blocked).',
+    contoh(root) { $('#in', root).value = 'https://github.com'; },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Website URL</label><div class="row"><input class="f" id="in" placeholder="https://example.com" style="flex:1;min-width:220px"><button class="btn acc" id="scan" type="button">Scan</button></div><div id="out" style="margin-top:14px"></div>`;
+      const scan = async () => {
+        const out = $('#out', root), btn = $('#scan', root); let u = $('#in', root).value.trim(); if (!u) return;
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Fetching ${esc(u)}…</div>`;
+        try {
+          const res = await fetch('/api/headers?url=' + encodeURIComponent(u)); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Scan failed');
+          const gcls = d.score >= 75 ? 'ok' : d.score >= 40 ? 'warn' : 'err';
+          const ic = s => s === 'pass' ? '✓' : s === 'warn' ? '!' : '✕';
+          let html = `<div class="row" style="align-items:center;gap:14px"><span class="pill ${gcls}" style="font-size:17px;padding:6px 16px">Grade ${d.grade}</span><b class="mono">${d.score}/100</b><span class="pill ${d.https ? 'ok' : 'err'}">${d.https ? 'HTTPS' : 'HTTP only'}</span>${d.redirected ? '<span class="pill info">redirected</span>' : ''}</div><div class="progress" style="margin:10px 0 14px"><i style="width:${d.score}%"></i></div>`;
+          html += `<div class="kv"><span class="k">Final URL</span><span class="v">${esc(d.url)}</span></div><div class="kv"><span class="k">Status</span><span class="v">${d.status}</span></div>${d.server ? `<div class="kv"><span class="k">Server</span><span class="v">${esc(d.server)}</span></div>` : ''}${d.poweredBy ? `<div class="kv"><span class="k">X-Powered-By</span><span class="v">${esc(d.poweredBy)}</span></div>` : ''}`;
+          html += '<label class="lbl" style="margin-top:14px">Security headers</label>' + d.checks.map(c => `<div class="kv"><span class="k">${ic(c.state)} ${esc(c.name)}</span><span class="v"><span class="pill ${c.state === 'pass' ? 'ok' : c.state === 'warn' ? 'warn' : 'err'}">${c.state === 'pass' ? 'OK' : c.state === 'warn' ? 'Weak' : 'Missing'}</span></span></div>${c.state !== 'pass' ? `<div class="note" style="margin:1px 0 7px">${esc(c.tip)}</div>` : ''}`).join('');
+          if (d.cookies && d.cookies.length) html += '<label class="lbl" style="margin-top:14px">Cookies</label>' + d.cookies.map(c => `<div class="kv"><span class="k">${esc(c.name)}</span><span class="v">${c.secure ? '<span class="pill ok">Secure</span> ' : '<span class="pill err">no Secure</span> '}${c.httpOnly ? '<span class="pill ok">HttpOnly</span> ' : '<span class="pill warn">no HttpOnly</span> '}<span class="pill info">SameSite: ${esc(c.sameSite)}</span></span></div>`).join('');
+          out.innerHTML = html;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', scan); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') scan(); });
+    } },
+
+  { id: 'dnsscan', grp: 'Scanners', e: '🌐', live: true, name: 'DNS & Email Security', desc: 'Look up DNS records + check SPF, DMARC, DNSSEC & CAA.',
+    tujuan: '<b>What it\'s for:</b> look up a domain\'s DNS records (A, AAAA, MX, NS, CAA, TXT) and check its <b>email security</b> posture — SPF, DMARC (and policy), DNSSEC, and CAA. <b>When:</b> auditing a domain or debugging email deliverability. <b>Live:</b> resolved via DNS-over-HTTPS from this site\'s Cloudflare edge.',
+    contoh(root) { $('#in', root).value = 'github.com'; },
+    body(root) {
+      root.innerHTML = `<div class="row"><div style="flex:1;min-width:200px"><label class="lbl">Domain</label><input class="f" id="in" placeholder="example.com"></div><div><label class="lbl">DKIM selector (optional)</label><input class="f" id="sel" placeholder="e.g. google, default" style="width:170px"></div></div><div class="row" style="margin-top:10px"><button class="btn acc" id="scan" type="button">Lookup</button></div><div id="out" style="margin-top:14px"></div>`;
+      const yn = (ok, good, bad) => `<span class="pill ${ok ? 'ok' : 'err'}">${ok ? '✓ ' + good : '✕ ' + (bad || good)}</span>`;
+      const scan = async () => {
+        const out = $('#out', root), btn = $('#scan', root); const dom = $('#in', root).value.trim(); if (!dom) return;
+        const sel = $('#sel', root).value.trim();
+        btn.classList.add('loading'); prog.start(true); out.innerHTML = `<div class="proc"><span class="spinner"></span>Resolving ${esc(dom)}…</div>`;
+        try {
+          const res = await fetch('/api/dns?domain=' + encodeURIComponent(dom) + (sel ? '&selector=' + encodeURIComponent(sel) : '')); const d = await res.json(); prog.done(); btn.classList.remove('loading');
+          if (!res.ok) return setErr(out, d.error || 'Lookup failed');
+          const s = d.summary;
+          let html = `<label class="lbl">Email &amp; DNS security</label><div class="row" style="gap:8px">${yn(s.spf, 'SPF', 'no SPF')}${yn(s.dmarc, 'DMARC' + (d.email.dmarcPolicy ? ' (' + d.email.dmarcPolicy + ')' : ''), 'no DMARC')}${d.email.dmarc ? (s.dmarcStrong ? '<span class="pill ok">strong policy</span>' : '<span class="pill warn">weak policy (p=none)</span>') : ''}${yn(s.dnssec, 'DNSSEC', 'no DNSSEC')}${yn(s.caa, 'CAA', 'no CAA')}</div>`;
+          const rec = (label, arr) => arr && arr.length ? `<label class="lbl" style="margin-top:14px">${label} <span class="hg-cnt">${arr.length}</span></label>` + arr.map(x => `<div class="out" style="min-height:0;padding:9px 12px;margin-bottom:6px">${esc(x)}</div>`).join('') : '';
+          html += rec('A', d.records.A) + rec('AAAA', d.records.AAAA) + rec('MX', d.records.MX) + rec('NS', d.records.NS) + rec('CAA', d.records.CAA) + rec('TXT', d.records.TXT);
+          if (sel) html += rec('DKIM (' + esc(sel) + ')', d.email.dkim ? [d.email.dkim] : []);
+          out.innerHTML = html;
+        } catch (e) { prog.done(); btn.classList.remove('loading'); setErr(out, 'Network error — ' + e.message); }
+      };
+      $('#scan', root).addEventListener('click', scan); $('#in', root).addEventListener('keydown', e => { if (e.key === 'Enter') scan(); });
+    } },
+
+  { id: 'dockerlint', grp: 'Scanners', e: '🐳', name: 'Dockerfile Linter', desc: 'Lint a Dockerfile for security & best-practice issues.',
+    tujuan: '<b>What it\'s for:</b> check a Dockerfile against common security and best-practice rules (root user, unpinned base image, curl|bash, hardcoded secrets, apt cache, and more). Like a lightweight hadolint. <b>When:</b> before building or shipping an image. Runs 100% on-device.',
+    contoh(root) { $('#in', root).value = 'FROM node:latest\nADD https://example.com/app.tar.gz /app\nRUN apt-get update && apt-get install curl\nENV API_KEY=supersecret123\nRUN curl https://get.example.com | bash\nCMD ["node","server.js"]'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Dockerfile</label><textarea id="in" style="min-height:170px" placeholder="FROM ..."></textarea><div id="stat" style="margin-top:12px"></div><div id="out" style="margin-top:6px"></div>`;
+      const LINE = [
+        { re: /^\s*FROM\s+\S+:latest(\s|$)/i, sev: 'warn', msg: 'Base image uses the `latest` tag — pin a specific version for reproducible builds. (DL3007)' },
+        { re: /^\s*FROM\s+[^\s:@]+\s*$/i, sev: 'warn', msg: 'Base image has no tag — pin an explicit version. (DL3006)' },
+        { re: /apt-get\s+install(?![^\n]*--no-install-recommends)/i, sev: 'info', msg: 'Add `--no-install-recommends` to apt-get install to keep the image small. (DL3015)' },
+        { re: /(^|\s)(ADD)\s+(?!--)(?!https?:)[^\s]+/i, sev: 'info', msg: 'Prefer COPY over ADD unless you need URL download or tar extraction. (DL3020)' },
+        { re: /curl\s+[^|]*\|\s*(sudo\s+)?(ba)?sh/i, sev: 'high', msg: 'Piping curl into a shell executes unverified remote code. Download, verify, then run. (security)' },
+        { re: /wget\s+[^|]*\|\s*(ba)?sh/i, sev: 'high', msg: 'Piping wget into a shell executes unverified remote code. (security)' },
+        { re: /(ENV|ARG)\s+\w*(PASSWORD|SECRET|TOKEN|APIKEY|API_KEY|ACCESS_KEY)\w*\s*[= ]/i, sev: 'high', msg: 'Possible hardcoded secret in ENV/ARG — use build secrets or runtime env, never bake secrets into layers. (security)' },
+        { re: /^\s*RUN\s+sudo\s/i, sev: 'warn', msg: 'Avoid `sudo` inside RUN — it can behave unexpectedly in containers. (DL3004)' },
+        { re: /pip\s+install(?![^\n]*--no-cache-dir)/i, sev: 'info', msg: 'Use `pip install --no-cache-dir` to reduce image size. (DL3042)' },
+        { re: /^\s*WORKDIR\s+(?!\/|\$)/i, sev: 'info', msg: 'Use an absolute path for WORKDIR. (DL3000)' },
+      ];
+      const DOC = [
+        { test: t => /^\s*(FROM|RUN|CMD|ENTRYPOINT)/im.test(t) && !/^\s*USER\s+/im.test(t), sev: 'high', msg: 'No USER instruction — the container runs as root. Create and switch to a non-root user. (DL3002)' },
+        { test: t => /^\s*(FROM)/im.test(t) && !/HEALTHCHECK/i.test(t), sev: 'info', msg: 'No HEALTHCHECK instruction — consider adding one so orchestrators know the container is healthy. (DL3057)' },
+        { test: t => /apt-get\s+install/i.test(t) && !/rm\s+-rf\s+\/var\/lib\/apt\/lists/i.test(t), sev: 'info', msg: 'After apt-get install, clean the cache (`rm -rf /var/lib/apt/lists/*`) in the same RUN to shrink the image. (DL3009)' },
+      ];
+      const run = () => {
+        const text = $('#in', root).value, out = $('#out', root), stat = $('#stat', root);
+        if (!text.trim()) { stat.innerHTML = ''; out.innerHTML = ''; return; }
+        const lines = text.split('\n'); const finds = [];
+        lines.forEach((l, i) => LINE.forEach(r => { if (r.re.test(l)) finds.push({ sev: r.sev, line: i + 1, msg: r.msg }); }));
+        DOC.forEach(r => { if (r.test(text)) finds.push({ sev: r.sev, line: '—', msg: r.msg }); });
+        const order = { high: 0, warn: 1, info: 2 }; finds.sort((a, b) => order[a.sev] - order[b.sev] || (a.line === '—' ? 999 : a.line) - (b.line === '—' ? 999 : b.line));
+        if (!finds.length) { stat.innerHTML = '<span class="pill ok">✓ No issues found</span>'; out.innerHTML = '<div class="note">Looks clean against the built-in rules. Still review for your own context.</div>'; return; }
+        const nH = finds.filter(f => f.sev === 'high').length, nW = finds.filter(f => f.sev === 'warn').length, nI = finds.filter(f => f.sev === 'info').length;
+        stat.innerHTML = `${nH ? `<span class="pill err">${nH} high</span> ` : ''}${nW ? `<span class="pill warn">${nW} warning</span> ` : ''}${nI ? `<span class="pill info">${nI} info</span>` : ''}`;
+        const pc = s => s === 'high' ? 'err' : s === 'warn' ? 'warn' : 'info';
+        out.innerHTML = finds.map(f => `<div class="kv"><span class="k"><span class="pill ${pc(f.sev)}">${f.sev}</span> ${f.line !== '—' ? 'line ' + f.line : 'file'}</span><span class="v" style="text-align:left;max-width:78%">${esc(f.msg)}</span></div>`).join('');
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
 ];
 
-const GROUPS = ['Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];
+const GROUPS = ['Scanners', 'Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];
 const HOME_TITLE = 'DevSec Toolbox — Developer & Security Tools Online (100% in the Browser)';
 const HOME_DESC = 'A collection of free developer & security tools that run 100% in the browser: JWT decoder, AES encryption, SHA & MD5 hashing, HMAC, JSON, regex, QR, unit conversion, and more. No server, no data sent anywhere.';
 
@@ -1018,13 +1155,19 @@ function current() {
   return dt && TOOLS.some(t => t.id === dt) ? dt : 'home';
 }
 function setMeta(title, desc) { document.title = title; const md = document.querySelector('meta[name="description"]'); if (md && desc) md.setAttribute('content', desc); }
+function setPriv(live) {
+  const p = document.querySelector('.topbar .priv');
+  if (p) { p.classList.toggle('live', !!live); p.innerHTML = live ? '<svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 10-12h-7z"/></svg> Live · edge' : '<svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg> on-device'; }
+  const sf = document.querySelector('.side-foot');
+  if (sf) sf.innerHTML = live ? "⚡ <b>Live scanner.</b> Your query is sent to this site's Cloudflare edge to run (never stored)." : "🔒 <b>100% in your browser.</b> No data is sent to any server.";
+}
 
-const SLUG = { 'Security': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Converters': 'konversi' };
-const card = t => `<a class="hcard" data-grp="${SLUG[t.grp]}" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
+const SLUG = { 'Scanners': 'scanners', 'Security': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Converters': 'konversi' };
+const card = t => `<a class="hcard" data-grp="${SLUG[t.grp]}" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}${t.live ? '<span class="hc-live">Live</span>' : ''}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
 function renderHome() {
   runCleanup();
   const root = $('#tool');
-  $('#ttl').textContent = 'Home'; $('#desc').textContent = '';
+  $('#ttl').textContent = 'Home'; $('#desc').textContent = ''; setPriv(false);
   const counts = Object.fromEntries(GROUPS.map(g => [g, TOOLS.filter(t => t.grp === g).length]));
   const gdot = g => `<span class="gdot" data-grp="${SLUG[g]}"></span>`;
   root.innerHTML = `<div class="home-hero">
@@ -1033,6 +1176,7 @@ function renderHome() {
       <p>From decoding JWTs, AES encryption, hashing &amp; HMAC, to QR, regex, conversion &amp; SEO — everything runs <b>inside your browser</b>, with no server &amp; no data sent. Free, for everyone.</p>
       <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="hsearch" type="text" placeholder="Search tools… e.g. jwt, hash, qr, color, csv"><kbd>/</kbd></div>
       <div class="home-badges"><span class="hb">🔒 <b>On-device</b></span><span class="hb">⚡ <b>Instant</b></span><span class="hb">✅ <b>Tested</b></span><span class="hb">🆓 <b>No ads</b></span></div>
+      <div class="home-stats" id="hstats"></div>
     </div>
     <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">All <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
     <div id="hgrid"></div>
@@ -1053,6 +1197,7 @@ function renderHome() {
   $('#hfilter', root).addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; group = b.dataset.g; [...$('#hfilter', root).children].forEach(c => c.classList.toggle('on', c === b)); render(); });
   $('#hsearch', root).addEventListener('input', e => { query = e.target.value; render(); });
   render();
+  fetch('/api/stats').then(r => r.json()).then(d => { const s = (d && d.stats) || {}; const he = $('#hstats'); const n = x => (x || 0).toLocaleString('en-US'); if (he && (s.packages_scanned || s.sites_scanned)) he.innerHTML = `<span class="hs-dot"></span>Live edge totals · <b>${n(s.packages_scanned)}</b> dependencies scanned · <b>${n(s.vulns_found)}</b> vulnerabilities found · <b>${n(s.sites_scanned)}</b> sites checked`; }).catch(() => {});
   setMeta(HOME_TITLE, HOME_DESC);
   markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
@@ -1062,7 +1207,7 @@ let _arsenal;
 function loadArsenal() { return _arsenal || (_arsenal = import(new URL('arsenal.js?v11', import.meta.url).href)); }
 async function renderArsenal() {
   runCleanup();
-  $('#ttl').textContent = 'DevSecOps Arsenal'; $('#desc').textContent = '';
+  $('#ttl').textContent = 'DevSecOps Arsenal'; $('#desc').textContent = ''; setPriv(false);
   const root = $('#tool');
   root.innerHTML = `<div class="home-hero" style="padding-bottom:4px">
       <div class="home-eyebrow">📚 Curated · open-source · from awesome-devsecops</div>
@@ -1100,7 +1245,7 @@ function open(id) {
   if (id === 'home') return renderHome();
   if (id === 'arsenal') return renderArsenal();
   const t = TOOLS.find(x => x.id === id) || TOOLS[0];
-  $('#ttl').textContent = t.name; $('#desc').textContent = t.desc;
+  $('#ttl').textContent = t.name; $('#desc').textContent = t.desc; setPriv(t.live);
   const root = $('#tool'); root.innerHTML = '';
   const pb = el('div', 'purpose'); pb.innerHTML = `<span class="pi">${t.e}</span><div class="pt">${t.tujuan || esc(t.desc)}${t.contoh ? '<div class="ex"><button type="button" id="_ex">▶ Try example</button></div>' : ''}</div>`;
   root.appendChild(pb);
