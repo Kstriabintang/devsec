@@ -1059,7 +1059,7 @@ function renderHome() {
 
 // ---------- DevSecOps Arsenal (curated directory, lazy-loaded) ----------
 let _arsenal;
-function loadArsenal() { return _arsenal || (_arsenal = import(new URL('arsenal.js', import.meta.url).href)); }
+function loadArsenal() { return _arsenal || (_arsenal = import(new URL('arsenal.js?v11', import.meta.url).href)); }
 async function renderArsenal() {
   runCleanup();
   $('#ttl').textContent = 'DevSecOps Arsenal'; $('#desc').textContent = '';
@@ -1067,7 +1067,8 @@ async function renderArsenal() {
   root.innerHTML = `<div class="home-hero" style="padding-bottom:4px">
       <div class="home-eyebrow">📚 Curated · open-source · from awesome-devsecops</div>
       <h2>The DevSecOps <span class="g">Arsenal</span>.</h2>
-      <p class="arsenal-intro">A hand-picked directory of the best open-source DevSecOps tools — SAST, DAST, dependencies, secrets, containers, IaC, cloud &amp; supply-chain security. These run on your machine or CI (not in the browser); DevSec Toolbox just helps you discover and compare them.</p>
+      <p class="arsenal-intro">A comprehensive directory of <b id="acount">270+</b> open-source DevSecOps tools, curated from the community <span class="mono">awesome-devsecops</span> lists. These are external tools — the badge on each card shows <b>how it runs</b>, so it is honest about what runs on your machine vs in the browser. Only <span class="ars-run" data-r="Browser">Browser</span>-tagged tools run in the browser like the DevSec Toolbox itself.</p>
+      <div class="ars-legend"><span class="ars-run" data-r="CLI">CLI</span> command line · <span class="ars-run" data-r="Server">Server</span> self-hosted · <span class="ars-run" data-r="SaaS">SaaS</span> hosted product · <span class="ars-run" data-r="GUI">GUI</span> desktop app · <span class="ars-run" data-r="Practice">Practice</span> labs · <span class="ars-run" data-r="Browser">Browser</span> in-browser</div>
       <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="asearch" type="text" placeholder="Search the arsenal… e.g. terraform, sbom, kubernetes"></div>
     </div>
     <div class="home-filter" id="afilter"></div>
@@ -1078,11 +1079,12 @@ async function renderArsenal() {
   let mod; try { mod = await loadArsenal(); } catch (e) { const g = $('#agrid'); if (g) g.innerHTML = '<div class="empty-note">Failed to load the catalogue.</div>'; return; }
   if (current() !== 'arsenal') return; // user navigated away while loading
   const { ARSENAL, ARSENAL_CATS } = mod;
+  const ac = $('#acount'); if (ac) ac.textContent = ARSENAL.length;
   const fmtStars = n => !n ? '' : n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
   let cat = 'all', q = '';
   const fil = $('#afilter'), grid = $('#agrid');
   fil.innerHTML = `<button class="chip on" data-c="all" type="button">All <span class="cnt">${ARSENAL.length}</span></button>` + ARSENAL_CATS.map(c => `<button class="chip" data-c="${esc(c)}" type="button">${esc(c)} <span class="cnt">${ARSENAL.filter(a => a.cat === c).length}</span></button>`).join('');
-  const acard = a => `<a class="ars-card" href="${esc(a.url)}" target="_blank" rel="noopener"><div class="ars-top"><b>${esc(a.name)}</b>${a.stars ? `<span class="ars-star">★ ${fmtStars(a.stars)}</span>` : ''}</div><div class="ars-d">${esc(a.desc)}</div><div class="ars-tags"><span class="ars-tag">${esc(a.cat)}</span>${(a.tags || []).map(t => `<span class="ars-tag">${esc(t)}</span>`).join('')}</div></a>`;
+  const acard = a => `<a class="ars-card" href="${esc(a.url)}" target="_blank" rel="noopener"><div class="ars-top"><b>${esc(a.name)}</b><span class="ars-run" data-r="${esc(a.run)}">${esc(a.run)}</span>${a.stars ? `<span class="ars-star">★ ${fmtStars(a.stars)}</span>` : ''}</div>${a.desc ? `<div class="ars-d">${esc(a.desc)}</div>` : ''}<div class="ars-tags"><span class="ars-tag">${esc(a.cat)}</span></div></a>`;
   const render = () => {
     const ql = q.toLowerCase().trim();
     const arr = ARSENAL.filter(a => (cat === 'all' || a.cat === cat) && (!ql || (a.name + ' ' + a.desc + ' ' + a.cat + ' ' + (a.tags || []).join(' ')).toLowerCase().includes(ql)));

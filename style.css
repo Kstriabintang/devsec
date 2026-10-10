@@ -299,8 +299,18 @@ mark{background:rgba(124,156,255,.34);color:#fff;border-radius:3px;padding:0 2px
 .ars-top b{font-size:14px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ars-star{font-size:11px;font-weight:700;color:var(--warn);background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.25);border-radius:999px;padding:2px 8px;flex:none}
 .ars-d{font-size:12.5px;color:var(--tx2);line-height:1.5}
-.ars-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.ars-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto;padding-top:4px}
 .ars-tag{font-size:10px;font-weight:600;color:var(--tx3);background:var(--panel3);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+.ars-card{justify-content:flex-start}
+/* runtime badge — honest "where it runs" marker */
+.ars-run{font-size:9.5px;font-weight:800;border-radius:6px;padding:2px 7px;letter-spacing:.03em;text-transform:uppercase;flex:none;white-space:nowrap}
+.ars-run[data-r="Browser"]{color:var(--acc);background:rgba(0,205,172,.14);border:1px solid rgba(0,205,172,.35)}
+.ars-run[data-r="SaaS"]{color:#c084fc;background:rgba(192,132,252,.12);border:1px solid rgba(192,132,252,.3)}
+.ars-run[data-r="Server"]{color:#7c9cff;background:rgba(124,156,255,.12);border:1px solid rgba(124,156,255,.3)}
+.ars-run[data-r="GUI"]{color:#fbbf24;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.3)}
+.ars-run[data-r="Practice"]{color:#fb7185;background:rgba(251,113,133,.12);border:1px solid rgba(251,113,133,.3)}
+.ars-run[data-r="CLI"]{color:var(--tx2);background:var(--panel3);border:1px solid var(--line2)}
+.ars-legend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:14px 0 2px;font-size:11.5px;color:var(--tx3)}
 
 /* ===== MOBILE ===== */
 .menutgl{display:none}
