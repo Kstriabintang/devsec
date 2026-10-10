@@ -1,26 +1,48 @@
-// DevSec Toolbox — alat developer & keamanan, 100% di browser (tanpa jaringan).
-// Tiap alat punya "tujuan" (untuk apa & kapan dipakai) + contoh. Semua diverifikasi vs nilai standar.
+// DevSec Toolbox — developer & security tools, 100% in-browser (no network).
+// Each tool has a "tujuan" (what it's for & when to use it) + example. All verified against standard values.
 const $ = (s, r = document) => r.querySelector(s);
 const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const enc = new TextEncoder();
 const fire = inp => inp.dispatchEvent(new Event('input', { bubbles: true }));
 
-// Akar aplikasi (mis. "/devsec/") — dihitung dari lokasi app.js agar rute berbasis path jalan.
+// App root (e.g. "/devsec/") — computed from app.js location so path-based routes work.
 const BASE = new URL('.', import.meta.url).pathname;
-// jsQR dimuat malas (lazy) — hanya saat alat "Baca QR" dibuka.
+// jsQR is lazy-loaded — only when the "QR Reader" tool is opened.
 let _jsqr;
-function loadJsQR() { return _jsqr || (_jsqr = new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('vendor/jsqr.min.js', import.meta.url).href; s.onload = () => res(window.jsQR); s.onerror = () => rej(new Error('gagal memuat pemindai')); document.head.appendChild(s); })); }
-// Pembersih: alat yang memasang listener global mendaftarkannya agar dilepas saat pindah alat.
+function loadJsQR() { return _jsqr || (_jsqr = new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('vendor/jsqr.min.js', import.meta.url).href; s.onload = () => res(window.jsQR); s.onerror = () => rej(new Error('failed to load scanner')); document.head.appendChild(s); })); }
+// Cleanup: tools that attach global listeners register them here so they're removed on tool switch.
 let _cleanup = null;
 function onCleanup(fn) { _cleanup = fn; }
 function runCleanup() { if (_cleanup) { try { _cleanup(); } catch (e) { } _cleanup = null; } }
 
-function toast(msg = 'Tersalin ✓') { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('on'), 1400); }
-function copy(text) { navigator.clipboard.writeText(text).then(() => toast()).catch(() => toast('Gagal menyalin')); }
-function withCopy(outEl, getText) { const b = el('button', 'copy', 'Salin'); b.type = 'button'; b.addEventListener('click', () => copy(typeof getText === 'function' ? getText() : outEl.innerText)); outEl.appendChild(b); return outEl; }
+function toast(msg = 'Copied ✓') { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('on'), 1400); }
+function copy(text) { navigator.clipboard.writeText(text).then(() => toast()).catch(() => toast('Copy failed')); }
+function withCopy(outEl, getText) { const b = el('button', 'copy', 'Copy'); b.type = 'button'; b.addEventListener('click', () => copy(typeof getText === 'function' ? getText() : outEl.innerText)); outEl.appendChild(b); return outEl; }
 
-// ---------- util kripto ----------
+// ---------- global progress bar (top of screen) — NProgress-style, lightweight ----------
+const dsTop = (() => { const b = el('div', 'ds-top', '<i></i>'); (document.body || document.documentElement).appendChild(b); return b; })();
+const dsBar = dsTop.firstElementChild;
+const prog = {
+  _v: 0, _t: 0,
+  start(indeterminate) { clearTimeout(this._t); this._v = 0.08; dsTop.classList.toggle('indet', !!indeterminate); dsTop.classList.add('on'); if (!indeterminate) dsBar.style.width = '8%'; },
+  set(frac) { if (!dsTop.classList.contains('on')) this.start(false); dsTop.classList.remove('indet'); this._v = Math.max(this._v, Math.min(0.985, frac)); dsBar.style.width = (this._v * 100).toFixed(1) + '%'; },
+  done() { clearTimeout(this._t); dsTop.classList.remove('indet'); dsBar.style.width = '100%'; this._t = setTimeout(() => { dsTop.classList.remove('on'); dsBar.style.width = '0'; }, 300); },
+  pulse() { this.start(true); clearTimeout(this._t); this._t = setTimeout(() => this.done(), 260); }
+};
+// Show a "processing" status inside a .out + global progress bar, then run the async fn.
+async function withProc(outEl, label, fn) {
+  outEl.classList.remove('empty');
+  outEl.innerHTML = `<div class="proc"><span class="spinner"></span>${esc(label || 'Processing…')}</div>`;
+  prog.start(true);
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); // let the UI repaint
+  try { const r = await fn(); prog.done(); return r; }
+  catch (e) { prog.done(); throw e; }
+}
+// Read a file into an ArrayBuffer with real progress events (for large files).
+function readFileProgress(file, onFrac) { return new Promise((res, rej) => { const r = new FileReader(); r.onprogress = e => { if (e.lengthComputable && onFrac) onFrac(e.loaded / e.total); }; r.onload = () => res(r.result); r.onerror = () => rej(new Error('failed to read file')); r.readAsArrayBuffer(file); }); }
+
+// ---------- crypto utils ----------
 async function sha(algo, dataStrOrBuf) { const data = typeof dataStrOrBuf === 'string' ? enc.encode(dataStrOrBuf) : dataStrOrBuf; const buf = await crypto.subtle.digest(algo, data); return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join(''); }
 async function hmacSha256(key, msg) { const k = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']); const sig = await crypto.subtle.sign('HMAC', k, enc.encode(msg)); return new Uint8Array(sig); }
 const hex = u8 => [...u8].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -33,58 +55,58 @@ function md5(str) { function rl(n, s) { return (n << s) | (n >>> (32 - s)); } fu
 const setOut = (out, txt) => { out.textContent = txt || '—'; out.classList.toggle('empty', !txt); if (txt) withCopy(out, () => txt); };
 const setErr = (out, msg) => { out.innerHTML = '<span class="pill err">' + esc(msg) + '</span>'; out.classList.remove('empty'); };
 
-// ================= REGISTRY ALAT =================
+// ================= TOOL REGISTRY =================
 const TOOLS = [
-  // ---------- KEAMANAN ----------
-  { id: 'jwt', grp: 'Keamanan', e: '🎫', name: 'JWT Decoder & Verify', desc: 'Bongkar token JWT dan (opsional) verifikasi tanda tangan HS256.',
-    tujuan: '<b>Untuk apa:</b> JWT dipakai untuk sesi login & otorisasi API. Alat ini membaca isi token (siapa, peran, kapan kedaluwarsa) dan bisa <b>memverifikasi</b> apakah token asli/tidak dipalsukan (HS256) memakai secret-mu. <b>Kapan:</b> saat debugging autentikasi atau memeriksa token yang mencurigakan — semua di browser, token tak pernah dikirim.',
+  // ---------- SECURITY ----------
+  { id: 'jwt', grp: 'Security', e: '🎫', name: 'JWT Decoder & Verify', desc: 'Decode a JWT and (optionally) verify its HS256 signature.',
+    tujuan: '<b>What it\'s for:</b> JWTs are used for login sessions & API authorization. This tool reads a token\'s contents (who, role, when it expires) and can <b>verify</b> whether a token is genuine/untampered (HS256) using your secret. <b>When:</b> debugging authentication or inspecting a suspicious token — everything runs in the browser, the token is never sent.',
     contoh(root) { $('#in', root).value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6Ik5hZGlhIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzM1Njg5NjAwLCJleHAiOjE3NjcyMjU2MDB9.3Toql3l7Wzn3f0dW8kK5m0dW3Zt6xO2xU5aQ2vFqk1o'; $('#sec', root).value = ''; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Token JWT</label><textarea id="in" placeholder="eyJhbGciOi..."></textarea>
-        <label class="lbl" style="margin-top:12px">Secret (opsional — untuk verifikasi HS256)</label><input class="f" id="sec" placeholder="secret HMAC">
+      root.innerHTML = `<label class="lbl">JWT token</label><textarea id="in" placeholder="eyJhbGciOi..."></textarea>
+        <label class="lbl" style="margin-top:12px">Secret (optional — for HS256 verification)</label><input class="f" id="sec" placeholder="HMAC secret">
         <div class="cardrow" style="margin-top:14px"><div><label class="lbl">Header</label><div class="out empty" id="h">—</div></div><div><label class="lbl">Payload</label><div class="out empty" id="p">—</div></div></div>
         <div id="verify" style="margin-top:12px"></div><div id="claims"></div>`;
       const run = async () => {
         const t = $('#in', root).value.trim(), H = $('#h', root), P = $('#p', root), C = $('#claims', root), V = $('#verify', root);
         C.innerHTML = ''; V.innerHTML = '';
         if (!t) { H.textContent = P.textContent = '—'; H.classList.add('empty'); P.classList.add('empty'); return; }
-        const parts = t.split('.'); if (parts.length < 2) return setErr(H, 'Bukan JWT valid (butuh header.payload.signature)');
+        const parts = t.split('.'); if (parts.length < 2) return setErr(H, 'Not a valid JWT (needs header.payload.signature)');
         let hd, pl;
-        try { hd = JSON.parse(b64urlToStr(parts[0])); pl = JSON.parse(b64urlToStr(parts[1])); } catch (e) { return setErr(H, 'Gagal decode: ' + e.message); }
+        try { hd = JSON.parse(b64urlToStr(parts[0])); pl = JSON.parse(b64urlToStr(parts[1])); } catch (e) { return setErr(H, 'Decode failed: ' + e.message); }
         H.textContent = JSON.stringify(hd, null, 2); H.classList.remove('empty'); withCopy(H, () => JSON.stringify(hd, null, 2));
         P.textContent = JSON.stringify(pl, null, 2); P.classList.remove('empty'); withCopy(P, () => JSON.stringify(pl, null, 2));
         const now = Math.floor(Date.now() / 1000), fmt = s => new Date(s * 1000).toLocaleString(), rows = [];
-        if (hd.alg) rows.push(['Algoritma', hd.alg]);
-        if (pl.iat) rows.push(['Diterbitkan (iat)', fmt(pl.iat)]);
-        if (pl.exp) rows.push(['Kedaluwarsa (exp)', fmt(pl.exp) + (pl.exp > now ? '  ✓ masih berlaku' : '  ✕ SUDAH kedaluwarsa')]);
+        if (hd.alg) rows.push(['Algorithm', hd.alg]);
+        if (pl.iat) rows.push(['Issued at (iat)', fmt(pl.iat)]);
+        if (pl.exp) rows.push(['Expires (exp)', fmt(pl.exp) + (pl.exp > now ? '  ✓ still valid' : '  ✕ EXPIRED')]);
         if (pl.sub) rows.push(['Subject (sub)', pl.sub]); if (pl.iss) rows.push(['Issuer (iss)', pl.iss]);
-        if (rows.length) C.innerHTML = '<label class="lbl" style="margin-top:14px">Klaim</label>' + rows.map(r => `<div class="kv"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('');
+        if (rows.length) C.innerHTML = '<label class="lbl" style="margin-top:14px">Claims</label>' + rows.map(r => `<div class="kv"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('');
         const sec = $('#sec', root).value;
         if (sec && parts[2]) {
-          if (hd.alg !== 'HS256') { V.innerHTML = '<span class="pill warn">Verifikasi otomatis hanya untuk HS256 (token ini ' + esc(hd.alg || '?') + ')</span>'; return; }
+          if (hd.alg !== 'HS256') { V.innerHTML = '<span class="pill warn">Auto-verification is HS256-only (this token is ' + esc(hd.alg || '?') + ')</span>'; return; }
           const sig = await hmacSha256(sec, parts[0] + '.' + parts[1]);
           const ok = b64url(sig) === parts[2];
-          V.innerHTML = ok ? '<span class="pill ok">✓ Tanda tangan VALID — token asli</span>' : '<span class="pill err">✕ Tanda tangan TIDAK cocok — token palsu / secret salah</span>';
+          V.innerHTML = ok ? '<span class="pill ok">✓ Signature VALID — token is genuine</span>' : '<span class="pill err">✕ Signature does NOT match — forged token / wrong secret</span>';
         }
       };
       $('#in', root).addEventListener('input', run); $('#sec', root).addEventListener('input', run);
     } },
 
-  { id: 'jwtgen', grp: 'Keamanan', e: '🏷️', name: 'JWT Generator (HS256)', desc: 'Buat & tanda tangani token JWT HS256 dari payload + secret.',
-    tujuan: '<b>Untuk apa:</b> membuat token JWT bertanda tangan <b>HS256</b> dari payload (klaim) &amp; secret-mu — untuk menguji API/otorisasi tanpa backend. <b>Kapan:</b> butuh token uji cepat. Payload &amp; secret tidak pernah keluar dari browser. <b>Catatan:</b> jangan tempel secret produksi asli di alat online mana pun.',
+  { id: 'jwtgen', grp: 'Security', e: '🏷️', name: 'JWT Generator (HS256)', desc: 'Create & sign an HS256 JWT from a payload + secret.',
+    tujuan: '<b>What it\'s for:</b> create an <b>HS256</b>-signed JWT from your payload (claims) &amp; secret — to test APIs/authorization without a backend. <b>When:</b> you need a quick test token. The payload &amp; secret never leave the browser. <b>Note:</b> never paste a real production secret into any online tool.',
     contoh(root) { $('#pl', root).value = '{\n  "sub": "1234567890",\n  "name": "Nadia",\n  "role": "admin"\n}'; $('#sec', root).value = 'secret'; fire($('#pl', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">Payload (JSON)</label><textarea id="pl" style="min-height:120px" placeholder='{"sub":"123","role":"admin"}'></textarea>
-        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="iat" checked> Tambah iat (sekarang)</label><label class="chk"><input type="checkbox" id="exp"> Tambah exp (+1 jam)</label></div>
+        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="iat" checked> Add iat (now)</label><label class="chk"><input type="checkbox" id="exp"> Add exp (+1 hour)</label></div>
         <label class="lbl" style="margin-top:8px">Secret (HMAC)</label><input class="f" id="sec" placeholder="secret">
-        <label class="lbl" style="margin-top:12px">Token JWT</label><div class="out empty" id="out">—</div>
-        <div class="note">Hasilnya bisa langsung diperiksa di alat <b>JWT Decoder &amp; Verify</b> (tempel token + secret yang sama).</div>`;
+        <label class="lbl" style="margin-top:12px">JWT token</label><div class="out empty" id="out">—</div>
+        <div class="note">The result can be checked directly in the <b>JWT Decoder &amp; Verify</b> tool (paste the token + the same secret).</div>`;
       const b64urlJson = o => b64url(enc.encode(JSON.stringify(o)));
       const run = async () => {
         const out = $('#out', root), raw = $('#pl', root).value.trim(); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; }
-        let pl; try { pl = JSON.parse(raw); } catch (e) { return setErr(out, 'Payload bukan JSON valid: ' + e.message); }
-        if (typeof pl !== 'object' || Array.isArray(pl) || pl === null) return setErr(out, 'Payload harus objek {…}');
-        const sec = $('#sec', root).value; if (!sec) return setErr(out, 'Isi secret HMAC dulu');
+        let pl; try { pl = JSON.parse(raw); } catch (e) { return setErr(out, 'Payload is not valid JSON: ' + e.message); }
+        if (typeof pl !== 'object' || Array.isArray(pl) || pl === null) return setErr(out, 'Payload must be an object {…}');
+        const sec = $('#sec', root).value; if (!sec) return setErr(out, 'Enter the HMAC secret first');
         const now = Math.floor(Date.now() / 1000); if ($('#iat', root).checked) pl.iat = now; if ($('#exp', root).checked) pl.exp = now + 3600;
         const signingInput = b64urlJson({ alg: 'HS256', typ: 'JWT' }) + '.' + b64urlJson(pl);
         const token = signingInput + '.' + b64url(await hmacSha256(sec, signingInput));
@@ -93,62 +115,77 @@ const TOOLS = [
       root.querySelectorAll('textarea,input').forEach(x => x.addEventListener('input', run));
     } },
 
-  { id: 'aes', grp: 'Keamanan', e: '🔒', name: 'Enkripsi AES', desc: 'Enkripsi & dekripsi teks dengan AES-256-GCM + kata sandi (PBKDF2).',
-    tujuan: '<b>Untuk apa:</b> mengunci teks rahasia (catatan, kunci API, pesan) memakai <b>AES-256-GCM</b> — standar enkripsi kuat. Kunci diturunkan dari kata sandimu via <b>PBKDF2 (150.000 iterasi)</b> + salt acak, jadi hanya yang tahu sandi bisa membuka. <b>Kapan:</b> mengirim teks sensitif lewat kanal tak aman. Semua di browser — teks &amp; sandi tak pernah keluar.',
-    contoh(root) { $('#pass', root).value = 'rahasia123'; $('#in', root).value = 'Ini pesan rahasia untuk diuji 🔐'; $('#m button[data-m=enc]', root).click(); $('#go', root).click(); },
+  { id: 'aes', grp: 'Security', e: '🔒', name: 'AES Encryption', desc: 'Encrypt & decrypt text with AES-256-GCM + a password (PBKDF2).',
+    tujuan: '<b>What it\'s for:</b> lock secret text (notes, API keys, messages) with <b>AES-256-GCM</b> — a strong encryption standard. The key is derived from your password via <b>PBKDF2 (150,000 iterations)</b> + a random salt, so only someone who knows the password can unlock it. <b>When:</b> sending sensitive text over an insecure channel. Everything runs in the browser — the text &amp; password never leave.',
+    contoh(root) { $('#pass', root).value = 'secret123'; $('#in', root).value = 'This is a secret message to test 🔐'; $('#m button[data-m=enc]', root).click(); $('#go', root).click(); },
     body(root) {
       let mode = 'enc';
-      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="enc" class="on">Enkripsi</button><button data-m="dec">Dekripsi</button></div></div>
-        <label class="lbl">Kata sandi</label><input class="f" id="pass" type="text" placeholder="kata sandi rahasia">
-        <label class="lbl" style="margin-top:12px" id="inl">Teks</label><textarea id="in" placeholder="teks…"></textarea>
-        <button class="btn acc" id="go" type="button" style="margin-top:12px">Proses</button>
-        <label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>
-        <div class="note">Format keluaran: Base64 dari <span class="mono">salt(16) + iv(12) + ciphertext</span>. Untuk mendekripsi, tempel kembali seluruh Base64 itu &amp; sandi yang sama.</div>`;
-      const setMode = m => { mode = m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b.dataset.m === m)); $('#inl', root).textContent = m === 'enc' ? 'Teks (plaintext)' : 'Base64 terenkripsi'; };
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="enc" class="on">Encrypt</button><button data-m="dec">Decrypt</button></div></div>
+        <label class="lbl">Password</label><input class="f" id="pass" type="text" placeholder="secret password">
+        <label class="lbl" style="margin-top:12px" id="inl">Text</label><textarea id="in" placeholder="text…"></textarea>
+        <button class="btn acc" id="go" type="button" style="margin-top:12px">Run</button>
+        <label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>
+        <div class="note">Output format: Base64 of <span class="mono">salt(16) + iv(12) + ciphertext</span>. To decrypt, paste that entire Base64 back &amp; the same password.</div>`;
+      const setMode = m => { mode = m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b.dataset.m === m)); $('#inl', root).textContent = m === 'enc' ? 'Text (plaintext)' : 'Encrypted Base64'; };
       $('#m', root).addEventListener('click', e => { if (e.target.dataset.m) setMode(e.target.dataset.m); });
       async function deriveKey(pass, salt) { const base = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']); return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150000, hash: 'SHA-256' }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); }
       $('#go', root).addEventListener('click', async () => {
-        const pass = $('#pass', root).value, v = $('#in', root).value, out = $('#out', root);
-        if (!pass) return setErr(out, 'Isi kata sandi dulu'); if (!v) return setErr(out, 'Isi teks dulu');
+        const pass = $('#pass', root).value, v = $('#in', root).value, out = $('#out', root), btn = $('#go', root);
+        if (!pass) return setErr(out, 'Enter a password first'); if (!v) return setErr(out, 'Enter some text first');
+        btn.classList.add('loading'); const label = btn.textContent; btn.textContent = mode === 'enc' ? 'Encrypting…' : 'Decrypting…';
         try {
-          if (mode === 'enc') {
-            const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-            const key = await deriveKey(pass, salt);
-            const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(v)));
-            const bundle = new Uint8Array(28 + ct.length); bundle.set(salt, 0); bundle.set(iv, 16); bundle.set(ct, 28);
-            setOut(out, b64(bundle));
-          } else {
-            const raw = unb64(v.trim().replace(/\s+/g, '')); const salt = raw.slice(0, 16), iv = raw.slice(16, 28), ct = raw.slice(28);
-            const key = await deriveKey(pass, salt);
-            const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
-            setOut(out, new TextDecoder().decode(pt));
-          }
-        } catch (e) { setErr(out, mode === 'dec' ? 'Gagal dekripsi — sandi salah atau data rusak' : e.message); }
+          await withProc(out, mode === 'enc' ? 'Deriving key (PBKDF2 · 150,000 iterations) & encrypting…' : 'Deriving key & decrypting…', async () => {
+            if (mode === 'enc') {
+              const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+              const key = await deriveKey(pass, salt);
+              const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(v)));
+              const bundle = new Uint8Array(28 + ct.length); bundle.set(salt, 0); bundle.set(iv, 16); bundle.set(ct, 28);
+              setOut(out, b64(bundle));
+            } else {
+              const raw = unb64(v.trim().replace(/\s+/g, '')); const salt = raw.slice(0, 16), iv = raw.slice(16, 28), ct = raw.slice(28);
+              const key = await deriveKey(pass, salt);
+              const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+              setOut(out, new TextDecoder().decode(pt));
+            }
+          });
+        } catch (e) { setErr(out, mode === 'dec' ? 'Decryption failed — wrong password or corrupted data' : e.message); }
+        finally { btn.classList.remove('loading'); btn.textContent = label; }
       });
     } },
 
-  { id: 'hash', grp: 'Keamanan', e: '#️⃣', name: 'Hash Teks', desc: 'Hitung MD5, SHA-1, SHA-256, SHA-512 dari teks sekaligus.',
-    tujuan: '<b>Untuk apa:</b> "sidik jari" digital sebuah teks. Hash yang sama = isi sama; beda sedikit = hash berubah total. <b>Kapan:</b> memeriksa integritas, menyimpan checksum, atau membandingkan data. Catatan: MD5 &amp; SHA-1 sudah <b>tidak aman untuk keamanan</b> (rawan tabrakan) — pakai SHA-256+.',
+  { id: 'hash', grp: 'Security', e: '#️⃣', name: 'Text Hash', desc: 'Compute MD5, SHA-1, SHA-256, SHA-512 of text at once.',
+    tujuan: '<b>What it\'s for:</b> a digital "fingerprint" of a piece of text. Same hash = same content; a tiny change = a completely different hash. <b>When:</b> checking integrity, storing a checksum, or comparing data. Note: MD5 &amp; SHA-1 are now <b>insecure for security purposes</b> (collision-prone) — use SHA-256+.',
     contoh(root) { $('#in', root).value = 'abc'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Teks</label><textarea id="in" placeholder="Ketik teks…"></textarea><div id="out" style="margin-top:14px"></div>`;
-      const run = async () => { const v = $('#in', root).value, out = $('#out', root); if (!v) { out.innerHTML = '<div class="out empty">—</div>'; return; } const [s1, s256, s512] = await Promise.all([sha('SHA-1', v), sha('SHA-256', v), sha('SHA-512', v)]); const items = [['MD5', md5(v)], ['SHA-1', s1], ['SHA-256', s256], ['SHA-512', s512]]; out.innerHTML = items.map(([k, h]) => `<label class="lbl">${k}</label><div class="out">${esc(h)}<button class="copy" data-c="${esc(h)}">Salin</button></div>`).join(''); out.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => copy(b.dataset.c))); };
+      root.innerHTML = `<label class="lbl">Text</label><textarea id="in" placeholder="Type text…"></textarea><div id="out" style="margin-top:14px"></div>`;
+      const run = async () => { const v = $('#in', root).value, out = $('#out', root); if (!v) { out.innerHTML = '<div class="out empty">—</div>'; return; } const [s1, s256, s512] = await Promise.all([sha('SHA-1', v), sha('SHA-256', v), sha('SHA-512', v)]); const items = [['MD5', md5(v)], ['SHA-1', s1], ['SHA-256', s256], ['SHA-512', s512]]; out.innerHTML = items.map(([k, h]) => `<label class="lbl">${k}</label><div class="out">${esc(h)}<button class="copy" data-c="${esc(h)}">Copy</button></div>`).join(''); out.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => copy(b.dataset.c))); };
       $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'hashfile', grp: 'Keamanan', e: '📂', name: 'Hash File', desc: 'Hitung SHA-256/SHA-1/SHA-512 dari sebuah file (cek integritas).',
-    tujuan: '<b>Untuk apa:</b> memastikan file yang kamu unduh <b>utuh &amp; tidak diubah</b> — bandingkan hash-nya dengan yang dipublikasikan pembuat. <b>Kapan:</b> setelah mengunduh installer, ISO, atau rilis software. File diproses lokal, tidak diunggah ke mana pun.',
+  { id: 'hashfile', grp: 'Security', e: '📂', name: 'Hash File', desc: 'Compute SHA-256/SHA-1/SHA-512 of a file (integrity check).',
+    tujuan: '<b>What it\'s for:</b> confirm that a file you downloaded is <b>intact &amp; unaltered</b> — compare its hash against the one published by the author. <b>When:</b> after downloading an installer, ISO, or software release. The file is processed locally, never uploaded anywhere.',
     body(root) {
-      root.innerHTML = `<div class="drop" id="drop"><div class="big">Jatuhkan file di sini</div><div>atau klik untuk memilih · file tidak diunggah</div></div>
+      root.innerHTML = `<div class="drop" id="drop"><div class="big">Drop a file here</div><div>or click to choose · file not uploaded</div></div>
         <input type="file" id="file" style="display:none"><div id="meta" class="note"></div><div id="out" style="margin-top:12px"></div>`;
       const drop = $('#drop', root), file = $('#file', root);
       const run = async f => {
-        if (!f) return; $('#meta', root).innerHTML = `<b>${esc(f.name)}</b> · ${(f.size / 1024).toFixed(1)} KB`; $('#out', root).innerHTML = '<div class="out empty">menghitung…</div>';
-        const buf = await f.arrayBuffer();
+        if (!f) return;
+        const mb = f.size / 1048576;
+        $('#meta', root).innerHTML = `<b>${esc(f.name)}</b> · ${mb >= 1 ? mb.toFixed(2) + ' MB' : (f.size / 1024).toFixed(1) + ' KB'}`;
+        const out = $('#out', root);
+        out.innerHTML = `<div class="progress-lbl"><span>Reading file…</span><span id="pct">0%</span></div><div class="progress"><i id="pbar"></i></div>`;
+        prog.start(false);
+        let buf;
+        try {
+          buf = await readFileProgress(f, frac => { const p = Math.round(frac * 100); const bar = $('#pbar', out), pc = $('#pct', out); if (bar) bar.style.width = (frac * 90) + '%'; if (pc) pc.textContent = p + '%'; prog.set(frac * 0.9); });
+        } catch (e) { prog.done(); return setErr(out, e.message); }
+        out.innerHTML = `<div class="proc"><span class="spinner"></span>Computing hash (SHA-256 · SHA-1 · SHA-512)…</div>`;
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
         const [s256, s1, s512] = await Promise.all([sha('SHA-256', buf), sha('SHA-1', buf), sha('SHA-512', buf)]);
+        prog.done();
         const items = [['SHA-256', s256], ['SHA-1', s1], ['SHA-512', s512]];
-        $('#out', root).innerHTML = items.map(([k, h]) => `<label class="lbl">${k}</label><div class="out">${esc(h)}<button class="copy" data-c="${esc(h)}">Salin</button></div>`).join('');
-        $('#out', root).querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => copy(b.dataset.c)));
+        out.innerHTML = items.map(([k, h]) => `<label class="lbl">${k}</label><div class="out">${esc(h)}<button class="copy" data-c="${esc(h)}">Copy</button></div>`).join('');
+        out.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => copy(b.dataset.c)));
       };
       drop.addEventListener('click', () => file.click());
       file.addEventListener('change', e => run(e.target.files[0]));
@@ -157,129 +194,129 @@ const TOOLS = [
       drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); run(e.dataTransfer.files[0]); });
     } },
 
-  { id: 'hmac', grp: 'Keamanan', e: '🔑', name: 'HMAC-SHA256', desc: 'Hitung HMAC-SHA256 dari pesan memakai secret key.',
-    tujuan: '<b>Untuk apa:</b> membuktikan sebuah pesan benar dari pihak yang tahu secret &amp; tidak diubah (message authentication). <b>Kapan:</b> menandatangani webhook, memverifikasi callback pembayaran, atau tanda tangan API.',
-    contoh(root) { $('#key', root).value = 'kunci-rahasia'; $('#in', root).value = 'pesan penting'; fire($('#in', root)); },
+  { id: 'hmac', grp: 'Security', e: '🔑', name: 'HMAC-SHA256', desc: 'Compute HMAC-SHA256 of a message using a secret key.',
+    tujuan: '<b>What it\'s for:</b> prove a message really came from someone who knows the secret &amp; was not altered (message authentication). <b>When:</b> signing webhooks, verifying payment callbacks, or API signatures.',
+    contoh(root) { $('#key', root).value = 'secret-key'; $('#in', root).value = 'important message'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Secret key</label><input class="f" id="key" placeholder="kunci rahasia"><label class="lbl" style="margin-top:12px">Pesan</label><textarea id="in" placeholder="pesan…"></textarea><label class="lbl" style="margin-top:12px">HMAC-SHA256 (hex)</label><div class="out empty" id="out">—</div>`;
+      root.innerHTML = `<label class="lbl">Secret key</label><input class="f" id="key" placeholder="secret key"><label class="lbl" style="margin-top:12px">Message</label><textarea id="in" placeholder="message…"></textarea><label class="lbl" style="margin-top:12px">HMAC-SHA256 (hex)</label><div class="out empty" id="out">—</div>`;
       const run = async () => { const k = $('#key', root).value, m = $('#in', root).value, out = $('#out', root); if (!k || !m) { setOut(out, ''); return; } setOut(out, hex(await hmacSha256(k, m))); };
       $('#key', root).addEventListener('input', run); $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'password', grp: 'Keamanan', e: '🎲', name: 'Password Generator', desc: 'Buat sandi acak kuat (kriptografis) + meter entropi.',
-    tujuan: '<b>Untuk apa:</b> membuat sandi yang benar-benar acak &amp; sulit ditebak, memakai generator kriptografis (bukan Math.random). <b>Kapan:</b> tiap kali butuh sandi/kunci baru. Makin panjang &amp; beragam, makin tinggi entropinya.',
+  { id: 'password', grp: 'Security', e: '🎲', name: 'Password Generator', desc: 'Generate strong random (cryptographic) passwords + entropy meter.',
+    tujuan: '<b>What it\'s for:</b> generate truly random, hard-to-guess passwords using a cryptographic generator (not Math.random). <b>When:</b> whenever you need a new password/key. The longer &amp; more varied, the higher the entropy.',
     body(root) {
-      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Panjang</label><input class="f" id="len" type="number" value="16" min="4" max="128" style="width:100px">
-        <label class="chk"><input type="checkbox" id="up" checked> A-Z</label><label class="chk"><input type="checkbox" id="lo" checked> a-z</label><label class="chk"><input type="checkbox" id="nu" checked> 0-9</label><label class="chk"><input type="checkbox" id="sy" checked> simbol</label>
+      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Length</label><input class="f" id="len" type="number" value="16" min="4" max="128" style="width:100px">
+        <label class="chk"><input type="checkbox" id="up" checked> A-Z</label><label class="chk"><input type="checkbox" id="lo" checked> a-z</label><label class="chk"><input type="checkbox" id="nu" checked> 0-9</label><label class="chk"><input type="checkbox" id="sy" checked> symbols</label>
         <button class="btn acc" id="gen" type="button">Generate</button></div>
         <div class="out empty big" id="out" style="margin-top:12px">—</div><div id="meter" class="note"></div>`;
-      const run = () => { let set = ''; if ($('#up', root).checked) set += 'ABCDEFGHJKLMNPQRSTUVWXYZ'; if ($('#lo', root).checked) set += 'abcdefghijkmnpqrstuvwxyz'; if ($('#nu', root).checked) set += '23456789'; if ($('#sy', root).checked) set += '!@#$%^&*()-_=+[]{};:,.?'; const out = $('#out', root); if (!set) { out.textContent = 'Pilih minimal satu jenis karakter'; return; } const len = Math.max(4, Math.min(128, +$('#len', root).value || 16)); const rnd = crypto.getRandomValues(new Uint32Array(len)); let pw = ''; for (let i = 0; i < len; i++) pw += set[rnd[i] % set.length]; setOut(out, pw); const bits = Math.round(len * Math.log2(set.length)); const lvl = bits < 50 ? ['Lemah', 'err'] : bits < 80 ? ['Cukup', 'warn'] : ['Kuat', 'ok']; $('#meter', root).innerHTML = `Entropi ≈ <b>${bits} bit</b> · <span class="pill ${lvl[1]}">${lvl[0]}</span>`; };
+      const run = () => { let set = ''; if ($('#up', root).checked) set += 'ABCDEFGHJKLMNPQRSTUVWXYZ'; if ($('#lo', root).checked) set += 'abcdefghijkmnpqrstuvwxyz'; if ($('#nu', root).checked) set += '23456789'; if ($('#sy', root).checked) set += '!@#$%^&*()-_=+[]{};:,.?'; const out = $('#out', root); if (!set) { out.textContent = 'Select at least one character type'; return; } const len = Math.max(4, Math.min(128, +$('#len', root).value || 16)); const rnd = crypto.getRandomValues(new Uint32Array(len)); let pw = ''; for (let i = 0; i < len; i++) pw += set[rnd[i] % set.length]; setOut(out, pw); const bits = Math.round(len * Math.log2(set.length)); const lvl = bits < 50 ? ['Weak', 'err'] : bits < 80 ? ['Fair', 'warn'] : ['Strong', 'ok']; $('#meter', root).innerHTML = `Entropy ≈ <b>${bits} bits</b> · <span class="pill ${lvl[1]}">${lvl[0]}</span>`; };
       root.querySelectorAll('input').forEach(x => x.addEventListener('input', run)); $('#gen', root).addEventListener('click', run); run();
     } },
 
-  { id: 'pwcheck', grp: 'Keamanan', e: '🛡️', name: 'Cek Kekuatan Sandi', desc: 'Perkirakan kekuatan sandi & waktu untuk membobolnya.',
-    tujuan: '<b>Untuk apa:</b> menilai seberapa aman sebuah sandi — memperkirakan entropi &amp; berapa lama untuk ditebak secara brute-force. <b>Kapan:</b> mengecek sandi sebelum memakainya. Sandi tidak dikirim ke mana pun; ini estimasi kasar untuk edukasi, bukan jaminan.',
+  { id: 'pwcheck', grp: 'Security', e: '🛡️', name: 'Password Strength', desc: 'Estimate password strength & how long it would take to crack.',
+    tujuan: '<b>What it\'s for:</b> gauge how secure a password is — estimate its entropy &amp; how long it would take to guess by brute force. <b>When:</b> checking a password before using it. The password is never sent anywhere; this is a rough estimate for education, not a guarantee.',
     contoh(root) { $('#in', root).value = 'P@ssw0rd2024'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Sandi</label><input class="f" id="in" type="text" placeholder="ketik sandi untuk dinilai"><div id="out" style="margin-top:14px"></div>`;
+      root.innerHTML = `<label class="lbl">Password</label><input class="f" id="in" type="text" placeholder="type a password to assess"><div id="out" style="margin-top:14px"></div>`;
       const COMMON = ['password', 'qwerty', '123456', 'admin', '111111', 'iloveyou', 'welcome', 'letmein', 'monkey', 'dragon', 'abc123', 'p@ssw0rd'];
       const run = () => {
         const v = $('#in', root).value, out = $('#out', root); if (!v) { out.innerHTML = ''; return; }
         let pool = 0; if (/[a-z]/.test(v)) pool += 26; if (/[A-Z]/.test(v)) pool += 26; if (/[0-9]/.test(v)) pool += 10; if (/[^a-zA-Z0-9]/.test(v)) pool += 33;
         let bits = v.length * Math.log2(pool || 1);
         const warns = [];
-        if (COMMON.some(c => v.toLowerCase().includes(c))) { bits = Math.min(bits, 14); warns.push('Mengandung kata sandi umum'); }
-        if (/^(.)\1+$/.test(v)) { bits = Math.min(bits, 10); warns.push('Karakter berulang'); }
-        if (/^(0123456789|abcdefghijklmnopqrstuvwxyz|qwertyuiop)/i.test(v)) { bits = Math.min(bits, 15); warns.push('Pola berurutan'); }
-        if (v.length < 8) warns.push('Terlalu pendek (< 8 karakter)');
+        if (COMMON.some(c => v.toLowerCase().includes(c))) { bits = Math.min(bits, 14); warns.push('Contains a common password'); }
+        if (/^(.)\1+$/.test(v)) { bits = Math.min(bits, 10); warns.push('Repeated characters'); }
+        if (/^(0123456789|abcdefghijklmnopqrstuvwxyz|qwertyuiop)/i.test(v)) { bits = Math.min(bits, 15); warns.push('Sequential pattern'); }
+        if (v.length < 8) warns.push('Too short (< 8 characters)');
         const guesses = Math.pow(2, bits) / 2, perSec = 1e10, secs = guesses / perSec;
-        const human = s => s < 1 ? 'seketika' : s < 60 ? Math.round(s) + ' detik' : s < 3600 ? Math.round(s / 60) + ' menit' : s < 86400 ? Math.round(s / 3600) + ' jam' : s < 31536000 ? Math.round(s / 86400) + ' hari' : s < 3.15e9 ? Math.round(s / 31536000) + ' tahun' : (s / 31536000).toExponential(1) + ' tahun';
-        const lvl = bits < 40 ? ['Sangat Lemah', 'err'] : bits < 60 ? ['Lemah', 'err'] : bits < 80 ? ['Cukup', 'warn'] : bits < 100 ? ['Kuat', 'ok'] : ['Sangat Kuat', 'ok'];
-        out.innerHTML = `<div class="kv"><span class="k">Kekuatan</span><span class="v"><span class="pill ${lvl[1]}">${lvl[0]}</span></span></div>
-          <div class="kv"><span class="k">Entropi</span><span class="v">${Math.round(bits)} bit</span></div>
-          <div class="kv"><span class="k">Panjang</span><span class="v">${v.length} karakter</span></div>
-          <div class="kv"><span class="k">Perkiraan waktu bobol</span><span class="v">${human(secs)}</span></div>
+        const human = s => s < 1 ? 'instantly' : s < 60 ? Math.round(s) + ' seconds' : s < 3600 ? Math.round(s / 60) + ' minutes' : s < 86400 ? Math.round(s / 3600) + ' hours' : s < 31536000 ? Math.round(s / 86400) + ' days' : s < 3.15e9 ? Math.round(s / 31536000) + ' years' : (s / 31536000).toExponential(1) + ' years';
+        const lvl = bits < 40 ? ['Very Weak', 'err'] : bits < 60 ? ['Weak', 'err'] : bits < 80 ? ['Fair', 'warn'] : bits < 100 ? ['Strong', 'ok'] : ['Very Strong', 'ok'];
+        out.innerHTML = `<div class="kv"><span class="k">Strength</span><span class="v"><span class="pill ${lvl[1]}">${lvl[0]}</span></span></div>
+          <div class="kv"><span class="k">Entropy</span><span class="v">${Math.round(bits)} bits</span></div>
+          <div class="kv"><span class="k">Length</span><span class="v">${v.length} characters</span></div>
+          <div class="kv"><span class="k">Estimated time to crack</span><span class="v">${human(secs)}</span></div>
           ${warns.length ? '<div class="note" style="margin-top:10px">⚠️ ' + warns.map(esc).join(' · ') + '</div>' : ''}
-          <div class="note">Asumsi 10 miliar tebakan/detik (serangan offline). Estimasi edukatif.</div>`;
+          <div class="note">Assumes 10 billion guesses/second (offline attack). Educational estimate.</div>`;
       };
       $('#in', root).addEventListener('input', run);
     } },
 
   // ---------- ENCODE / DECODE ----------
-  { id: 'base64', grp: 'Encode / Decode', e: '🔡', name: 'Base64', desc: 'Encode & decode teks Base64 (UTF-8 & URL-safe).',
-    tujuan: '<b>Untuk apa:</b> mengubah teks/biner menjadi teks aman-transport (hanya A–Z, 0–9, +/). <b>Kapan:</b> menyisipkan data di URL, JSON, JWT, data URI, atau email. Base64 <b>bukan enkripsi</b> — siapa pun bisa men-decode-nya.',
-    contoh(root) { $('#in', root).value = 'Halo Dunia 🌍'; fire($('#in', root)); },
+  { id: 'base64', grp: 'Encode / Decode', e: '🔡', name: 'Base64', desc: 'Encode & decode Base64 text (UTF-8 & URL-safe).',
+    tujuan: '<b>What it\'s for:</b> turn text/binary into transport-safe text (only A–Z, 0–9, +/). <b>When:</b> embedding data in a URL, JSON, JWT, data URI, or email. Base64 is <b>not encryption</b> — anyone can decode it.',
+    contoh(root) { $('#in', root).value = 'Hello World 🌍'; fire($('#in', root)); },
     body(root) {
       let mode = 'encode', us = false;
-      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div><label class="chk"><input type="checkbox" id="us"> URL-safe</label></div><label class="lbl">Input</label><textarea id="in" placeholder="Ketik teks…"></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`;
-      const run = () => { const v = $('#in', root).value, out = $('#out', root); try { let r; if (mode === 'encode') { r = btoa(unescape(encodeURIComponent(v))); if (us) r = r.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); } else { let s = v.trim(); if (us || /[-_]/.test(s)) s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; r = decodeURIComponent(escape(atob(s))); } setOut(out, r); } catch (e) { setErr(out, 'Input tidak valid'); } };
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div><label class="chk"><input type="checkbox" id="us"> URL-safe</label></div><label class="lbl">Input</label><textarea id="in" placeholder="Type text…"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const run = () => { const v = $('#in', root).value, out = $('#out', root); try { let r; if (mode === 'encode') { r = btoa(unescape(encodeURIComponent(v))); if (us) r = r.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); } else { let s = v.trim(); if (us || /[-_]/.test(s)) s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; r = decodeURIComponent(escape(atob(s))); } setOut(out, r); } catch (e) { setErr(out, 'Invalid input'); } };
       $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); });
       $('#us', root).addEventListener('change', e => { us = e.target.checked; run(); }); $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'url', grp: 'Encode / Decode', e: '🔗', name: 'URL Encode', desc: 'Encode & decode komponen URL (encodeURIComponent).',
-    tujuan: '<b>Untuk apa:</b> mengamankan teks agar valid di dalam URL — spasi, &amp;, ?, / diubah jadi %XX. <b>Kapan:</b> menyusun query string atau parameter tautan secara manual.',
-    contoh(root) { $('#in', root).value = 'nama=Andi & kota=Yogyakarta?'; fire($('#in', root)); },
-    body(root) { let mode = 'encode'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in" placeholder="teks atau URL…"></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'encode' ? encodeURIComponent(v) : decodeURIComponent(v)); } catch (e) { setErr(out, 'Input tidak valid'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
+  { id: 'url', grp: 'Encode / Decode', e: '🔗', name: 'URL Encode', desc: 'Encode & decode URL components (encodeURIComponent).',
+    tujuan: '<b>What it\'s for:</b> make text safe inside a URL — spaces, &amp;, ?, / become %XX. <b>When:</b> building a query string or link parameters by hand.',
+    contoh(root) { $('#in', root).value = 'name=Andi & city=Yogyakarta?'; fire($('#in', root)); },
+    body(root) { let mode = 'encode'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in" placeholder="text or URL…"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'encode' ? encodeURIComponent(v) : decodeURIComponent(v)); } catch (e) { setErr(out, 'Invalid input'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
 
-  { id: 'htmlent', grp: 'Encode / Decode', e: '🏷️', name: 'HTML Entities', desc: 'Encode & decode entitas HTML untuk menampilkan < > & di web.',
-    tujuan: '<b>Untuk apa:</b> menampilkan karakter khusus (&lt; &gt; &amp; " \') sebagai teks di HTML tanpa dianggap tag — mencegah rusaknya markup &amp; XSS. <b>Kapan:</b> menampilkan kode/teks pengguna di halaman web.',
+  { id: 'htmlent', grp: 'Encode / Decode', e: '🏷️', name: 'HTML Entities', desc: 'Encode & decode HTML entities to display < > & on the web.',
+    tujuan: '<b>What it\'s for:</b> display special characters (&lt; &gt; &amp; " \') as text in HTML without being treated as tags — preventing broken markup &amp; XSS. <b>When:</b> showing code/user text on a web page.',
     contoh(root) { $('#in', root).value = '<a href="x">Tom & Jerry</a>'; fire($('#in', root)); },
-    body(root) { let mode = 'encode'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`; const ta = document.createElement('textarea'); const run = () => { const v = $('#in', root).value, out = $('#out', root); let r; if (mode === 'encode') r = v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); else { ta.innerHTML = v; r = ta.value; } setOut(out, r); }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
+    body(root) { let mode = 'encode'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const ta = document.createElement('textarea'); const run = () => { const v = $('#in', root).value, out = $('#out', root); let r; if (mode === 'encode') r = v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); else { ta.innerHTML = v; r = ta.value; } setOut(out, r); }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
 
-  { id: 'escape', grp: 'Encode / Decode', e: '⤵️', name: 'Escape String', desc: 'Escape & unescape string gaya JSON/JS (\\n, \\t, \\uXXXX).',
-    tujuan: '<b>Untuk apa:</b> mengubah teks berbaris/berkarakter khusus menjadi satu baris aman untuk ditaruh di kode/JSON, dan sebaliknya. <b>Kapan:</b> menempel teks multi-baris ke dalam string kode atau file JSON.',
-    contoh(root) { $('#in', root).value = 'Baris 1\nBaris 2\t"kutip"'; fire($('#in', root)); },
-    body(root) { let mode = 'escape'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="escape" class="on">Escape</button><button data-m="unescape">Unescape</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'escape' ? JSON.stringify(v).slice(1, -1) : JSON.parse('"' + v.replace(/"/g, '\\"') + '"')); } catch (e) { setErr(out, 'Tidak bisa di-unescape'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
+  { id: 'escape', grp: 'Encode / Decode', e: '⤵️', name: 'Escape String', desc: 'Escape & unescape JSON/JS-style strings (\\n, \\t, \\uXXXX).',
+    tujuan: '<b>What it\'s for:</b> turn multi-line/special-character text into a single safe line to drop into code/JSON, and back again. <b>When:</b> pasting multi-line text into a code string or JSON file.',
+    contoh(root) { $('#in', root).value = 'Line 1\nLine 2\t"quote"'; fire($('#in', root)); },
+    body(root) { let mode = 'escape'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="escape" class="on">Escape</button><button data-m="unescape">Unescape</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'escape' ? JSON.stringify(v).slice(1, -1) : JSON.parse('"' + v.replace(/"/g, '\\"') + '"')); } catch (e) { setErr(out, 'Cannot unescape'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
 
-  { id: 'datauri', grp: 'Encode / Decode', e: '🖼️', name: 'Data URI (Base64 Gambar)', desc: 'Ubah gambar ↔ Data URI base64 untuk disematkan di HTML/CSS.',
-    tujuan: '<b>Untuk apa:</b> mengubah gambar kecil (ikon/logo) menjadi <b>Data URI</b> base64 agar bisa ditempel langsung di HTML/CSS tanpa file terpisah — hemat request. Bisa juga sebaliknya: menampilkan &amp; mengunduh gambar dari sebuah Data URI. <b>Kapan:</b> menyematkan ikon inline, atau memeriksa isi Data URI. Semua diproses lokal.',
+  { id: 'datauri', grp: 'Encode / Decode', e: '🖼️', name: 'Data URI (Base64 Image)', desc: 'Convert image ↔ base64 Data URI to embed in HTML/CSS.',
+    tujuan: '<b>What it\'s for:</b> turn a small image (icon/logo) into a base64 <b>Data URI</b> so it can be pasted directly into HTML/CSS with no separate file — saving a request. It also works the other way: display &amp; download an image from a Data URI. <b>When:</b> embedding an inline icon, or inspecting a Data URI\'s contents. Everything is processed locally.',
     body(root) {
       let mode = 'encode';
-      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Gambar → Data URI</button><button data-m="decode">Data URI → Gambar</button></div></div>
-        <div id="encbox"><div class="drop" id="drop"><div class="big">Jatuhkan gambar di sini</div><div>atau klik untuk memilih · ikon kecil ideal · tidak diunggah</div></div><input type="file" id="file" accept="image/*" style="display:none"></div>
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Image → Data URI</button><button data-m="decode">Data URI → Image</button></div></div>
+        <div id="encbox"><div class="drop" id="drop"><div class="big">Drop an image here</div><div>or click to choose · small icons are ideal · not uploaded</div></div><input type="file" id="file" accept="image/*" style="display:none"></div>
         <div id="decbox" style="display:none"><label class="lbl">Data URI</label><textarea id="din" placeholder="data:image/png;base64,iVBOR…"></textarea></div>
         <div id="preview"></div>`;
       const preview = $('#preview', root);
       function showEncoded(dataUri, size) {
         const kb = (size / 1024).toFixed(1), chars = dataUri.length;
-        preview.innerHTML = `<div class="uri-prev"><img alt="pratinjau"></div>
-          <div class="note">Ukuran asli ${kb} KB · Data URI ${chars.toLocaleString('id')} karakter${chars > 1e5 ? ' · <span class="pill warn">cukup besar untuk inline</span>' : ''}</div>
+        preview.innerHTML = `<div class="uri-prev"><img alt="preview"></div>
+          <div class="note">Original size ${kb} KB · Data URI ${chars.toLocaleString('en')} characters${chars > 1e5 ? ' · <span class="pill warn">fairly large for inline</span>' : ''}</div>
           <label class="lbl" style="margin-top:12px">Data URI</label><div class="out" id="out2"></div>
-          <div class="row" style="margin-top:10px"><button class="btn sm" data-c="css" type="button">Salin CSS url()</button><button class="btn sm" data-c="img" type="button">Salin &lt;img&gt;</button></div>`;
+          <div class="row" style="margin-top:10px"><button class="btn sm" data-c="css" type="button">Copy CSS url()</button><button class="btn sm" data-c="img" type="button">Copy &lt;img&gt;</button></div>`;
         preview.querySelector('.uri-prev img').src = dataUri;
         const out = $('#out2', preview); out.textContent = dataUri; withCopy(out, () => dataUri);
         preview.querySelector('[data-c=css]').addEventListener('click', () => copy(`background-image:url("${dataUri}");`));
         preview.querySelector('[data-c=img]').addEventListener('click', () => copy(`<img src="${dataUri}" alt="">`));
       }
-      const handleFile = f => { if (!f || !f.type.startsWith('image/')) { preview.innerHTML = '<span class="pill err">Bukan berkas gambar</span>'; return; } const r = new FileReader(); r.onload = () => showEncoded(r.result, f.size); r.readAsDataURL(f); };
+      const handleFile = f => { if (!f || !f.type.startsWith('image/')) { preview.innerHTML = '<span class="pill err">Not an image file</span>'; return; } const r = new FileReader(); r.onload = () => showEncoded(r.result, f.size); r.readAsDataURL(f); };
       const drop = $('#drop', root), file = $('#file', root);
       drop.addEventListener('click', () => file.click());
       file.addEventListener('change', e => handleFile(e.target.files[0]));
       drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
       drop.addEventListener('dragleave', () => drop.classList.remove('over'));
       drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handleFile(e.dataTransfer.files[0]); });
-      const decode = () => { const v = $('#din', root).value.trim(); if (!v) { preview.innerHTML = ''; return; } if (!/^data:image\//i.test(v)) { preview.innerHTML = '<span class="pill err">Harus diawali data:image/…</span>'; return; } preview.innerHTML = `<div class="uri-prev"><img alt="pratinjau"></div><div class="row" style="margin-top:10px"><button class="btn sm" id="dl" type="button">⭳ Unduh gambar</button></div>`; const img = preview.querySelector('.uri-prev img'); img.onerror = () => { const w = preview.querySelector('.uri-prev'); if (w) w.innerHTML = '<span class="pill err">Data URI tidak valid</span>'; }; img.src = v; const dl = $('#dl', preview); dl.addEventListener('click', () => { const a = document.createElement('a'); a.href = v; a.download = 'gambar'; a.click(); }); };
+      const decode = () => { const v = $('#din', root).value.trim(); if (!v) { preview.innerHTML = ''; return; } if (!/^data:image\//i.test(v)) { preview.innerHTML = '<span class="pill err">Must start with data:image/…</span>'; return; } preview.innerHTML = `<div class="uri-prev"><img alt="preview"></div><div class="row" style="margin-top:10px"><button class="btn sm" id="dl" type="button">⭳ Download image</button></div>`; const img = preview.querySelector('.uri-prev img'); img.onerror = () => { const w = preview.querySelector('.uri-prev'); if (w) w.innerHTML = '<span class="pill err">Invalid Data URI</span>'; }; img.src = v; const dl = $('#dl', preview); dl.addEventListener('click', () => { const a = document.createElement('a'); a.href = v; a.download = 'image'; a.click(); }); };
       $('#din', root).addEventListener('input', decode);
       $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); $('#encbox', root).style.display = mode === 'encode' ? '' : 'none'; $('#decbox', root).style.display = mode === 'decode' ? '' : 'none'; preview.innerHTML = ''; });
     } },
 
   // ---------- FORMAT & DATA ----------
-  { id: 'json', grp: 'Format & Data', e: '📦', name: 'JSON Formatter', desc: 'Rapikan, minify, & validasi JSON dengan pesan error.',
-    tujuan: '<b>Untuk apa:</b> merapikan JSON yang berantakan agar mudah dibaca, memadatkannya untuk produksi, dan mengecek apakah valid. <b>Kapan:</b> membaca respons API atau menyunting file konfigurasi.',
-    contoh(root) { $('#in', root).value = '{"nama":"Andi","umur":25,"skill":["JS","Go"],"aktif":true}'; fire($('#in', root)); },
-    body(root) { root.innerHTML = `<div class="row"><button class="btn acc sm" id="fmt" type="button">Rapikan</button><button class="btn sm" id="min" type="button">Minify</button><span id="stat"></span></div><label class="lbl">JSON</label><textarea id="in" style="min-height:180px" placeholder='{"hello":"world"}'></textarea><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`; const parse = () => { const v = $('#in', root).value.trim(), stat = $('#stat', root); if (!v) { stat.innerHTML = ''; return null; } try { const o = JSON.parse(v); stat.innerHTML = '<span class="pill ok">Valid</span>'; return o; } catch (e) { stat.innerHTML = '<span class="pill err">' + esc(e.message) + '</span>'; return undefined; } }; const show = (o, sp) => { const out = $('#out', root); if (o === undefined) return setErr(out, 'JSON tidak valid'); if (o === null) { setOut(out, ''); return; } setOut(out, JSON.stringify(o, null, sp)); }; $('#fmt', root).addEventListener('click', () => show(parse(), 2)); $('#min', root).addEventListener('click', () => show(parse(), 0)); $('#in', root).addEventListener('input', () => { const o = parse(); if (o && o !== undefined) show(o, 2); }); } },
+  { id: 'json', grp: 'Format & Data', e: '📦', name: 'JSON Formatter', desc: 'Beautify, minify, & validate JSON with error messages.',
+    tujuan: '<b>What it\'s for:</b> tidy up messy JSON so it\'s easy to read, compact it for production, and check whether it\'s valid. <b>When:</b> reading an API response or editing a config file.',
+    contoh(root) { $('#in', root).value = '{"name":"Andi","age":25,"skills":["JS","Go"],"active":true}'; fire($('#in', root)); },
+    body(root) { root.innerHTML = `<div class="row"><button class="btn acc sm" id="fmt" type="button">Beautify</button><button class="btn sm" id="min" type="button">Minify</button><span id="stat"></span></div><label class="lbl">JSON</label><textarea id="in" style="min-height:180px" placeholder='{"hello":"world"}'></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const parse = () => { const v = $('#in', root).value.trim(), stat = $('#stat', root); if (!v) { stat.innerHTML = ''; return null; } try { const o = JSON.parse(v); stat.innerHTML = '<span class="pill ok">Valid</span>'; return o; } catch (e) { stat.innerHTML = '<span class="pill err">' + esc(e.message) + '</span>'; return undefined; } }; const show = (o, sp) => { const out = $('#out', root); if (o === undefined) return setErr(out, 'Invalid JSON'); if (o === null) { setOut(out, ''); return; } setOut(out, JSON.stringify(o, null, sp)); }; $('#fmt', root).addEventListener('click', () => show(parse(), 2)); $('#min', root).addEventListener('click', () => show(parse(), 0)); $('#in', root).addEventListener('input', () => { const o = parse(); if (o && o !== undefined) show(o, 2); }); } },
 
-  { id: 'regex', grp: 'Format & Data', e: '🔍', name: 'Regex Tester', desc: 'Uji regex, sorot kecocokan, lihat grup tangkapan.',
-    tujuan: '<b>Untuk apa:</b> menguji pola pencarian teks (regular expression) secara langsung — melihat apa yang cocok sebelum dipakai di kode. <b>Kapan:</b> membuat validasi (email, telepon), parsing log, atau find-replace.',
-    contoh(root) { $('#pat', root).value = '\\b\\w+@\\w+\\.\\w+\\b'; $('#in', root).value = 'kontak: andi@mail.com dan budi@web.id'; fire($('#in', root)); },
-    body(root) { root.innerHTML = `<div class="row"><div style="flex:1;min-width:200px"><label class="lbl">Pola</label><input class="f" id="pat" placeholder="\\d+"></div><div><label class="lbl">Flag</label><input class="f" id="fl" value="g" style="width:90px"></div></div><label class="lbl">Teks uji</label><textarea id="in"></textarea><div class="row" style="margin-top:12px"><span id="stat"></span></div><label class="lbl">Sorotan</label><div class="out empty" id="hl">—</div><div id="groups"></div>`; const run = () => { const pat = $('#pat', root).value, fl = $('#fl', root).value, txt = $('#in', root).value, stat = $('#stat', root), hlEl = $('#hl', root), gEl = $('#groups', root); gEl.innerHTML = ''; if (!pat) { stat.innerHTML = ''; hlEl.textContent = '—'; hlEl.classList.add('empty'); return; } let re; try { re = new RegExp(pat, fl.includes('g') ? fl : fl + 'g'); } catch (e) { return setErr(stat, e.message); } let m, count = 0, last = 0, html = '', groups = []; try { while ((m = re.exec(txt)) !== null) { count++; html += esc(txt.slice(last, m.index)) + '<mark>' + esc(m[0] || '') + '</mark>'; last = m.index + (m[0].length || 0); if (m.length > 1) groups.push(m.slice(1)); if (!re.global) break; if (m[0] === '') re.lastIndex++; if (count > 5000) break; } } catch (e) { return setErr(stat, e.message); } html += esc(txt.slice(last)); stat.innerHTML = count ? `<span class="pill ok">${count} kecocokan</span>` : '<span class="pill warn">Tidak ada kecocokan</span>'; hlEl.innerHTML = html || '—'; hlEl.classList.toggle('empty', !txt); if (groups.length) gEl.innerHTML = '<label class="lbl" style="margin-top:14px">Grup (kecocokan pertama)</label>' + groups[0].map((g, i) => `<div class="kv"><span class="k">Grup ${i + 1}</span><span class="v">${esc(g == null ? '(kosong)' : g)}</span></div>`).join(''); }; root.querySelectorAll('input,textarea').forEach(x => x.addEventListener('input', run)); } },
+  { id: 'regex', grp: 'Format & Data', e: '🔍', name: 'Regex Tester', desc: 'Test regex, highlight matches, view capture groups.',
+    tujuan: '<b>What it\'s for:</b> test a text search pattern (regular expression) live — see what it matches before using it in code. <b>When:</b> building validation (email, phone), parsing logs, or find-and-replace.',
+    contoh(root) { $('#pat', root).value = '\\b\\w+@\\w+\\.\\w+\\b'; $('#in', root).value = 'contact: andi@mail.com and budi@web.id'; fire($('#in', root)); },
+    body(root) { root.innerHTML = `<div class="row"><div style="flex:1;min-width:200px"><label class="lbl">Pattern</label><input class="f" id="pat" placeholder="\\d+"></div><div><label class="lbl">Flags</label><input class="f" id="fl" value="g" style="width:90px"></div></div><label class="lbl">Test text</label><textarea id="in"></textarea><div class="row" style="margin-top:12px"><span id="stat"></span></div><label class="lbl">Highlights</label><div class="out empty" id="hl">—</div><div id="groups"></div>`; const run = () => { const pat = $('#pat', root).value, fl = $('#fl', root).value, txt = $('#in', root).value, stat = $('#stat', root), hlEl = $('#hl', root), gEl = $('#groups', root); gEl.innerHTML = ''; if (!pat) { stat.innerHTML = ''; hlEl.textContent = '—'; hlEl.classList.add('empty'); return; } let re; try { re = new RegExp(pat, fl.includes('g') ? fl : fl + 'g'); } catch (e) { return setErr(stat, e.message); } let m, count = 0, last = 0, html = '', groups = []; try { while ((m = re.exec(txt)) !== null) { count++; html += esc(txt.slice(last, m.index)) + '<mark>' + esc(m[0] || '') + '</mark>'; last = m.index + (m[0].length || 0); if (m.length > 1) groups.push(m.slice(1)); if (!re.global) break; if (m[0] === '') re.lastIndex++; if (count > 5000) break; } } catch (e) { return setErr(stat, e.message); } html += esc(txt.slice(last)); stat.innerHTML = count ? `<span class="pill ok">${count} matches</span>` : '<span class="pill warn">No matches</span>'; hlEl.innerHTML = html || '—'; hlEl.classList.toggle('empty', !txt); if (groups.length) gEl.innerHTML = '<label class="lbl" style="margin-top:14px">Groups (first match)</label>' + groups[0].map((g, i) => `<div class="kv"><span class="k">Group ${i + 1}</span><span class="v">${esc(g == null ? '(empty)' : g)}</span></div>`).join(''); }; root.querySelectorAll('input,textarea').forEach(x => x.addEventListener('input', run)); } },
 
-  { id: 'diff', grp: 'Format & Data', e: '↔️', name: 'Diff Teks', desc: 'Bandingkan dua teks baris demi baris (tambah/hapus).',
-    tujuan: '<b>Untuk apa:</b> melihat perbedaan antara dua versi teks — baris yang ditambah (hijau) &amp; dihapus (merah). <b>Kapan:</b> membandingkan konfigurasi, revisi dokumen, atau dua respons.',
-    contoh(root) { $('#a', root).value = 'baris satu\nbaris dua\nbaris tiga'; $('#b', root).value = 'baris satu\nbaris DUA diubah\nbaris tiga\nbaris empat'; fire($('#a', root)); },
+  { id: 'diff', grp: 'Format & Data', e: '↔️', name: 'Text Diff', desc: 'Compare two texts line by line (added/removed).',
+    tujuan: '<b>What it\'s for:</b> see the difference between two versions of text — lines added (green) &amp; removed (red). <b>When:</b> comparing configs, document revisions, or two responses.',
+    contoh(root) { $('#a', root).value = 'line one\nline two\nline three'; $('#b', root).value = 'line one\nline TWO changed\nline three\nline four'; fire($('#a', root)); },
     body(root) {
-      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Teks A (lama)</label><textarea id="a"></textarea></div><div><label class="lbl">Teks B (baru)</label><textarea id="b"></textarea></div></div><label class="lbl" style="margin-top:12px">Perbedaan</label><div class="out empty" id="out">—</div>`;
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Text A (old)</label><textarea id="a"></textarea></div><div><label class="lbl">Text B (new)</label><textarea id="b"></textarea></div></div><label class="lbl" style="margin-top:12px">Differences</label><div class="out empty" id="out">—</div>`;
       const run = () => {
         const A = $('#a', root).value.split('\n'), B = $('#b', root).value.split('\n'), out = $('#out', root);
         if (!$('#a', root).value && !$('#b', root).value) { out.textContent = '—'; out.classList.add('empty'); return; }
@@ -290,73 +327,73 @@ const TOOLS = [
         while (i < n) rows.push(['del', A[i++]]); while (j < m) rows.push(['add', B[j++]]);
         const sign = { same: '  ', add: '+ ', del: '- ' };
         out.classList.remove('empty');
-        out.innerHTML = rows.map(([t, l]) => `<div class="diffline ${t}">${esc(sign[t] + l)}</div>`).join('') || '<span class="pill ok">Identik</span>';
+        out.innerHTML = rows.map(([t, l]) => `<div class="diffline ${t}">${esc(sign[t] + l)}</div>`).join('') || '<span class="pill ok">Identical</span>';
       };
       $('#a', root).addEventListener('input', run); $('#b', root).addEventListener('input', run);
     } },
 
-  { id: 'numbase', grp: 'Format & Data', e: '🔢', name: 'Konversi Basis Angka', desc: 'Ubah angka antar biner, oktal, desimal, heksadesimal.',
-    tujuan: '<b>Untuk apa:</b> mengonversi bilangan antar basis 2/8/10/16 (mendukung angka besar via BigInt). <b>Kapan:</b> bekerja dengan bitmask, warna hex, alamat memori, atau flag.',
+  { id: 'numbase', grp: 'Format & Data', e: '🔢', name: 'Number Base Converter', desc: 'Convert numbers between binary, octal, decimal, hexadecimal.',
+    tujuan: '<b>What it\'s for:</b> convert numbers between base 2/8/10/16 (supports large numbers via BigInt). <b>When:</b> working with bitmasks, hex colors, memory addresses, or flags.',
     contoh(root) { $('#in', root).value = '255'; $('#from', root).value = '10'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<div class="row"><div style="flex:1"><label class="lbl">Angka</label><input class="f" id="in" placeholder="255"></div><div><label class="lbl">Dari basis</label><select class="f" id="from"><option value="2">Biner (2)</option><option value="8">Oktal (8)</option><option value="10" selected>Desimal (10)</option><option value="16">Heksa (16)</option></select></div></div><div id="out" style="margin-top:14px"></div>`;
-      const run = () => { const v = $('#in', root).value.trim().replace(/^0[xob]/i, ''), base = +$('#from', root).value, out = $('#out', root); if (!v) { out.innerHTML = ''; return; } try { let n = 0n; const B = BigInt(base); for (const ch of v.toLowerCase()) { if (ch === '_') continue; const d = parseInt(ch, base); if (isNaN(d) || d >= base) throw new Error('digit "' + ch + '" tidak valid untuk basis ' + base); n = n * B + BigInt(d); } out.innerHTML = [['Biner', n.toString(2)], ['Oktal', n.toString(8)], ['Desimal', n.toString(10)], ['Heksa', n.toString(16).toUpperCase()]].map(([k, val]) => `<div class="kv"><span class="k">${k}</span><span class="v" style="cursor:pointer" data-c="${val}">${esc(val)} ⧉</span></div>`).join(''); out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c))); } catch (e) { setErr(out, e.message); } };
+      root.innerHTML = `<div class="row"><div style="flex:1"><label class="lbl">Number</label><input class="f" id="in" placeholder="255"></div><div><label class="lbl">From base</label><select class="f" id="from"><option value="2">Binary (2)</option><option value="8">Octal (8)</option><option value="10" selected>Decimal (10)</option><option value="16">Hex (16)</option></select></div></div><div id="out" style="margin-top:14px"></div>`;
+      const run = () => { const v = $('#in', root).value.trim().replace(/^0[xob]/i, ''), base = +$('#from', root).value, out = $('#out', root); if (!v) { out.innerHTML = ''; return; } try { let n = 0n; const B = BigInt(base); for (const ch of v.toLowerCase()) { if (ch === '_') continue; const d = parseInt(ch, base); if (isNaN(d) || d >= base) throw new Error('digit "' + ch + '" invalid for base ' + base); n = n * B + BigInt(d); } out.innerHTML = [['Binary', n.toString(2)], ['Octal', n.toString(8)], ['Decimal', n.toString(10)], ['Hex', n.toString(16).toUpperCase()]].map(([k, val]) => `<div class="kv"><span class="k">${k}</span><span class="v" style="cursor:pointer" data-c="${val}">${esc(val)} ⧉</span></div>`).join(''); out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c))); } catch (e) { setErr(out, e.message); } };
       $('#in', root).addEventListener('input', run); $('#from', root).addEventListener('change', run);
     } },
 
-  { id: 'jsoncsv', grp: 'Format & Data', e: '📊', name: 'JSON → CSV', desc: 'Ubah array JSON objek menjadi tabel CSV (siap Excel).',
-    tujuan: '<b>Untuk apa:</b> mengubah data JSON berbentuk array objek menjadi CSV yang bisa dibuka di Excel / Google Sheets. Kolom diambil dari gabungan semua kunci; nilai objek/array ditulis sebagai JSON; koma &amp; kutip di-escape sesuai standar RFC 4180. <b>Kapan:</b> mengekspor respons API atau data ke spreadsheet.',
-    contoh(root) { $('#in', root).value = '[{"nama":"Andi","umur":25,"kota":"Yogyakarta"},{"nama":"Budi","umur":30,"kota":"Bandung","hobi":"catur"}]'; fire($('#in', root)); },
+  { id: 'jsoncsv', grp: 'Format & Data', e: '📊', name: 'JSON → CSV', desc: 'Convert a JSON array of objects into a CSV table (Excel-ready).',
+    tujuan: '<b>What it\'s for:</b> turn JSON data (an array of objects) into CSV that opens in Excel / Google Sheets. Columns are taken from the union of all keys; object/array values are written as JSON; commas &amp; quotes are escaped per the RFC 4180 standard. <b>When:</b> exporting an API response or data to a spreadsheet.',
+    contoh(root) { $('#in', root).value = '[{"name":"Andi","age":25,"city":"Yogyakarta"},{"name":"Budi","age":30,"city":"Bandung","hobby":"chess"}]'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">JSON (array objek)</label><textarea id="in" style="min-height:150px" placeholder='[{"a":1,"b":2}]'></textarea>
-        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="semi"> Pemisah titik-koma (;)</label><button class="btn sm" id="dl" type="button">⭳ Unduh CSV</button><span id="stat"></span></div>
+      root.innerHTML = `<label class="lbl">JSON (array of objects)</label><textarea id="in" style="min-height:150px" placeholder='[{"a":1,"b":2}]'></textarea>
+        <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="semi"> Semicolon separator (;)</label><button class="btn sm" id="dl" type="button">⭳ Download CSV</button><span id="stat"></span></div>
         <label class="lbl" style="margin-top:6px">CSV</label><div class="out empty" id="out">—</div>`;
       let lastCsv = '';
       const cell = (v, sep) => { if (v == null) return ''; let s = typeof v === 'object' ? JSON.stringify(v) : String(v); if (s.includes('"') || s.includes(sep) || s.includes('\n') || s.includes('\r')) s = '"' + s.replace(/"/g, '""') + '"'; return s; };
       const run = () => {
         const raw = $('#in', root).value.trim(), out = $('#out', root), stat = $('#stat', root); lastCsv = '';
         if (!raw) { out.textContent = '—'; out.classList.add('empty'); stat.innerHTML = ''; return; }
-        let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); }
+        let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'Invalid JSON: ' + e.message); }
         if (!Array.isArray(data)) data = [data];
-        if (!data.length) return setErr(out, 'Array kosong');
+        if (!data.length) return setErr(out, 'Empty array');
         const sep = $('#semi', root).checked ? ';' : ',';
         const keys = []; for (const row of data) { if (row && typeof row === 'object' && !Array.isArray(row)) for (const k of Object.keys(row)) if (!keys.includes(k)) keys.push(k); }
-        if (!keys.length) return setErr(out, 'Butuh array berisi objek {…}');
+        if (!keys.length) return setErr(out, 'Need an array of objects {…}');
         const lines = [keys.map(k => cell(k, sep)).join(sep)];
         for (const row of data) lines.push(keys.map(k => cell(row ? row[k] : '', sep)).join(sep));
         lastCsv = lines.join('\r\n'); out.classList.remove('empty'); out.textContent = lastCsv; withCopy(out, () => lastCsv);
-        stat.innerHTML = `<span class="pill ok">${data.length} baris · ${keys.length} kolom</span>`;
+        stat.innerHTML = `<span class="pill ok">${data.length} rows · ${keys.length} columns</span>`;
       };
       $('#dl', root).addEventListener('click', () => { if (!lastCsv) return; const blob = new Blob(['﻿' + lastCsv], { type: 'text/csv;charset=utf-8' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
       $('#in', root).addEventListener('input', run); $('#semi', root).addEventListener('change', run);
     } },
 
-  { id: 'csvjson', grp: 'Format & Data', e: '🧾', name: 'CSV → JSON', desc: 'Ubah CSV (dengan header) menjadi array JSON objek.',
-    tujuan: '<b>Untuk apa:</b> mengubah data CSV (dari Excel/Sheets/ekspor) menjadi JSON array objek yang siap dipakai di kode/API. Parser menangani tanda kutip, koma di dalam sel, &amp; baris baru dalam sel (RFC 4180). <b>Kapan:</b> mengimpor data spreadsheet ke aplikasi.',
-    contoh(root) { $('#in', root).value = 'nama,umur,kota\nAndi,25,Yogyakarta\n"Budi, S.T.",30,Bandung'; fire($('#in', root)); },
+  { id: 'csvjson', grp: 'Format & Data', e: '🧾', name: 'CSV → JSON', desc: 'Convert CSV (with a header) into a JSON array of objects.',
+    tujuan: '<b>What it\'s for:</b> turn CSV data (from Excel/Sheets/an export) into a JSON array of objects ready to use in code/an API. The parser handles quotes, commas inside cells, &amp; newlines inside cells (RFC 4180). <b>When:</b> importing spreadsheet data into an app.',
+    contoh(root) { $('#in', root).value = 'name,age,city\nAndi,25,Yogyakarta\n"Budi, S.T.",30,Bandung'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">CSV</label><textarea id="in" style="min-height:150px" placeholder="a,b,c&#10;1,2,3"></textarea>
-        <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Pemisah</label><select class="f" id="sep" style="width:130px"><option value="auto">Deteksi otomatis</option><option value=",">Koma ,</option><option value=";">Titik-koma ;</option><option value="\t">Tab</option></select>
-        <label class="chk"><input type="checkbox" id="hdr" checked> Baris pertama = header</label><label class="chk"><input type="checkbox" id="typ" checked> Deteksi angka & boolean</label><span id="stat"></span></div>
+        <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Separator</label><select class="f" id="sep" style="width:130px"><option value="auto">Auto-detect</option><option value=",">Comma ,</option><option value=";">Semicolon ;</option><option value="\t">Tab</option></select>
+        <label class="chk"><input type="checkbox" id="hdr" checked> First row = header</label><label class="chk"><input type="checkbox" id="typ" checked> Detect numbers & booleans</label><span id="stat"></span></div>
         <label class="lbl" style="margin-top:6px">JSON</label><div class="out empty" id="out">—</div>`;
       const parseCSV = (text, sep) => { const rows = []; let row = [], f = '', i = 0, q = false; while (i < text.length) { const c = text[i]; if (q) { if (c === '"') { if (text[i + 1] === '"') { f += '"'; i += 2; continue; } q = false; i++; continue; } f += c; i++; continue; } if (c === '"') { q = true; i++; continue; } if (c === sep) { row.push(f); f = ''; i++; continue; } if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; i++; continue; } if (c === '\r') { i++; continue; } f += c; i++; } if (f !== '' || row.length) { row.push(f); rows.push(row); } return rows; };
       const coerce = v => { if (!$('#typ', root).checked) return v; const t = v.trim(); if (t === '') return ''; if (/^-?\d+(\.\d+)?$/.test(t) && t.length < 16) return Number(t); if (/^(true|false)$/i.test(t)) return t.toLowerCase() === 'true'; if (/^null$/i.test(t)) return null; return v; };
       const run = () => {
         const raw = $('#in', root).value, out = $('#out', root), stat = $('#stat', root); if (!raw.trim()) { out.textContent = '—'; out.classList.add('empty'); stat.innerHTML = ''; return; }
         let sep = $('#sep', root).value; if (sep === 'auto') { const first = raw.split('\n')[0]; sep = [[',', (first.match(/,/g) || []).length], [';', (first.match(/;/g) || []).length], ['\t', (first.match(/\t/g) || []).length]].sort((a, b) => b[1] - a[1])[0][0]; }
-        const rows = parseCSV(raw.replace(/\n+$/, ''), sep); if (!rows.length) return setErr(out, 'CSV kosong');
+        const rows = parseCSV(raw.replace(/\n+$/, ''), sep); if (!rows.length) return setErr(out, 'Empty CSV');
         let result;
         if ($('#hdr', root).checked) { const keys = rows[0]; result = rows.slice(1).map(r => { const o = {}; keys.forEach((k, i) => o[k] = coerce(r[i] == null ? '' : r[i])); return o; }); }
         else result = rows.map(r => r.map(coerce));
         out.classList.remove('empty'); out.textContent = JSON.stringify(result, null, 2); withCopy(out, () => JSON.stringify(result, null, 2));
-        stat.innerHTML = `<span class="pill ok">${result.length} baris</span>`;
+        stat.innerHTML = `<span class="pill ok">${result.length} rows</span>`;
       };
       root.querySelectorAll('textarea,select,input').forEach(x => x.addEventListener('input', run)); $('#sep', root).addEventListener('change', run);
     } },
 
-  { id: 'jsonyaml', grp: 'Format & Data', e: '🧩', name: 'JSON → YAML', desc: 'Ubah JSON menjadi YAML yang rapi & valid.',
-    tujuan: '<b>Untuk apa:</b> mengonversi JSON menjadi <b>YAML</b> — format konfigurasi yang lebih mudah dibaca (dipakai Docker Compose, Kubernetes, CI/CD, dsb). <b>Kapan:</b> menyalin data JSON ke file konfigurasi YAML. Berjalan di browser.',
-    contoh(root) { $('#in', root).value = '{"name":"devsec","version":3,"aktif":true,"tags":["dev","security"],"meta":{"author":"Ksatria","tools":26}}'; fire($('#in', root)); },
+  { id: 'jsonyaml', grp: 'Format & Data', e: '🧩', name: 'JSON → YAML', desc: 'Convert JSON into clean, valid YAML.',
+    tujuan: '<b>What it\'s for:</b> convert JSON into <b>YAML</b> — a more readable config format (used by Docker Compose, Kubernetes, CI/CD, etc.). <b>When:</b> copying JSON data into a YAML config file. Runs in the browser.',
+    contoh(root) { $('#in', root).value = '{"name":"devsec","version":3,"active":true,"tags":["dev","security"],"meta":{"author":"Ksatria","tools":26}}'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><label class="lbl" style="margin-top:12px">YAML</label><div class="out empty" id="out">—</div>`;
       const scalar = v => { if (v === null) return 'null'; if (typeof v === 'boolean' || typeof v === 'number') return String(v); const s = String(v); if (s === '') return "''"; if (/[:#\[\]{}&*!|>'"%@`,]/.test(s) || /^[\s-?]/.test(s) || /\s$/.test(s) || /^(true|false|null|yes|no|on|off|~)$/i.test(s) || /^[-+]?[\d.]/.test(s) && /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return JSON.stringify(s); return s; };
@@ -367,13 +404,13 @@ const TOOLS = [
         const keys = Object.keys(v); if (!keys.length) return '{}';
         return '\n' + keys.map(k => { const val = v[k], key = scalar(k); if (val !== null && typeof val === 'object' && (Array.isArray(val) ? val.length : Object.keys(val).length)) return pad + key + ':' + dump(val, ind + 1); return pad + key + ': ' + dump(val, ind + 1); }).join('\n');
       };
-      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); } const y = dump(data, 0).replace(/^\n/, ''); out.classList.remove('empty'); out.textContent = y || '(kosong)'; withCopy(out, () => y); };
+      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'Invalid JSON: ' + e.message); } const y = dump(data, 0).replace(/^\n/, ''); out.classList.remove('empty'); out.textContent = y || '(empty)'; withCopy(out, () => y); };
       $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'yamljson', grp: 'Format & Data', e: '🔃', name: 'YAML → JSON', desc: 'Ubah YAML (subset umum) menjadi JSON.',
-    tujuan: '<b>Untuk apa:</b> mengubah <b>YAML</b> (map, list, list-of-map, skalar, komentar) menjadi JSON. <b>Kapan:</b> menyalin config YAML ke JSON. Mendukung subset umum YAML; fitur lanjutan (anchor, blok multi-baris <span class="mono">|</span>/<span class="mono">&gt;</span>, gaya flow) belum didukung dan akan memberi pesan error, bukan hasil salah.',
-    contoh(root) { $('#in', root).value = 'name: devsec\nversion: 3\naktif: true\ntags:\n  - dev\n  - security\nmeta:\n  author: Ksatria\n  tools: 26\nusers:\n  - name: Andi\n    role: admin\n  - name: Budi\n    role: editor'; fire($('#in', root)); },
+  { id: 'yamljson', grp: 'Format & Data', e: '🔃', name: 'YAML → JSON', desc: 'Convert YAML (common subset) into JSON.',
+    tujuan: '<b>What it\'s for:</b> convert <b>YAML</b> (maps, lists, list-of-maps, scalars, comments) into JSON. <b>When:</b> copying a YAML config into JSON. Supports a common YAML subset; advanced features (anchors, multi-line blocks <span class="mono">|</span>/<span class="mono">&gt;</span>, flow style) are not yet supported and will return an error message rather than a wrong result.',
+    contoh(root) { $('#in', root).value = 'name: devsec\nversion: 3\nactive: true\ntags:\n  - dev\n  - security\nmeta:\n  author: Ksatria\n  tools: 26\nusers:\n  - name: Andi\n    role: admin\n  - name: Budi\n    role: editor'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">YAML</label><textarea id="in" style="min-height:170px" placeholder="key: value&#10;list:&#10;  - a&#10;  - b"></textarea><label class="lbl" style="margin-top:12px">JSON</label><div class="out empty" id="out">—</div>`;
       const findComment = s => { let q = null; for (let i = 0; i < s.length; i++) { const c = s[i]; if (q) { if (c === q) q = null; } else if (c === '"' || c === "'") q = c; else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return i; } return -1; };
@@ -386,18 +423,18 @@ const TOOLS = [
         let pos = 0;
         const node = minInd => { if (pos >= lines.length) return null; const ind = lines[pos].indent; if (ind < minInd) return null; return (lines[pos].text === '-' || lines[pos].text.startsWith('- ')) ? list(ind) : map(ind); };
         const list = ind => { const arr = []; while (pos < lines.length && lines[pos].indent === ind && (lines[pos].text === '-' || lines[pos].text.startsWith('- '))) { const rest = lines[pos].text === '-' ? '' : lines[pos].text.slice(2); if (rest === '') { pos++; arr.push(node(ind + 1)); } else if (matchKey(rest)) { lines[pos] = { indent: ind + 2, text: rest }; arr.push(map(ind + 2)); } else { pos++; arr.push(scalar(rest)); } } return arr; };
-        const map = ind => { const obj = {}; while (pos < lines.length && lines[pos].indent === ind && !(lines[pos].text === '-' || lines[pos].text.startsWith('- '))) { const m = matchKey(lines[pos].text); if (!m) throw new Error('baris tidak valid: "' + lines[pos].text + '"'); const key = unquote(m[1].trim()), val = m[2]; if (val === '') { pos++; const c = node(ind + 1); obj[key] = c === null ? null : c; } else { pos++; obj[key] = scalar(val); } } return obj; };
-        const r = node(0); if (pos < lines.length) throw new Error('indentasi tidak konsisten dekat: "' + lines[pos].text + '"'); return r === null ? {} : r;
+        const map = ind => { const obj = {}; while (pos < lines.length && lines[pos].indent === ind && !(lines[pos].text === '-' || lines[pos].text.startsWith('- '))) { const m = matchKey(lines[pos].text); if (!m) throw new Error('invalid line: "' + lines[pos].text + '"'); const key = unquote(m[1].trim()), val = m[2]; if (val === '') { pos++; const c = node(ind + 1); obj[key] = c === null ? null : c; } else { pos++; obj[key] = scalar(val); } } return obj; };
+        const r = node(0); if (pos < lines.length) throw new Error('inconsistent indentation near: "' + lines[pos].text + '"'); return r === null ? {} : r;
       };
-      const run = () => { const raw = $('#in', root).value, out = $('#out', root); if (!raw.trim()) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = parse(raw); } catch (e) { return setErr(out, 'YAML tidak didukung/ tidak valid: ' + e.message); } const j = JSON.stringify(data, null, 2); out.classList.remove('empty'); out.textContent = j; withCopy(out, () => j); };
+      const run = () => { const raw = $('#in', root).value, out = $('#out', root); if (!raw.trim()) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = parse(raw); } catch (e) { return setErr(out, 'Unsupported / invalid YAML: ' + e.message); } const j = JSON.stringify(data, null, 2); out.classList.remove('empty'); out.textContent = j; withCopy(out, () => j); };
       $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'jsonts', grp: 'Format & Data', e: '🧠', name: 'JSON → TypeScript', desc: 'Hasilkan interface TypeScript dari contoh JSON.',
-    tujuan: '<b>Untuk apa:</b> membuat definisi tipe <b>TypeScript</b> (interface) otomatis dari contoh data JSON — hemat waktu &amp; anti salah ketik saat memodelkan respons API. <b>Kapan:</b> memulai integrasi API di proyek TypeScript. Diproses di browser.',
+  { id: 'jsonts', grp: 'Format & Data', e: '🧠', name: 'JSON → TypeScript', desc: 'Generate TypeScript interfaces from sample JSON.',
+    tujuan: '<b>What it\'s for:</b> auto-generate <b>TypeScript</b> type definitions (interfaces) from sample JSON data — saving time &amp; avoiding typos when modeling an API response. <b>When:</b> starting an API integration in a TypeScript project. Processed in the browser.',
     contoh(root) { $('#in', root).value = '{"id":1,"name":"Nadia","active":true,"roles":["admin","editor"],"profile":{"age":25,"city":"Yogyakarta"},"tags":[]}'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Nama root</label><input class="f" id="rn" value="Root" style="width:160px"></div><label class="lbl" style="margin-top:10px">TypeScript</label><div class="out empty" id="out">—</div>`;
+      root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Root name</label><input class="f" id="rn" value="Root" style="width:160px"></div><label class="lbl" style="margin-top:10px">TypeScript</label><div class="out empty" id="out">—</div>`;
       const pascal = s => { s = String(s).replace(/[^a-zA-Z0-9]+/g, ' ').trim(); if (!s) return 'X'; return s.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join('').replace(/^([0-9])/, '_$1'); };
       const singular = s => s.replace(/ies$/, 'y').replace(/([^s])s$/, '$1') || s;
       const isId = k => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
@@ -425,22 +462,22 @@ const TOOLS = [
         let head = ''; if (Array.isArray(data) || typeof data !== 'object' || data === null) head = `type ${pascal(rootName)} = ${rootType};\n\n`;
         return head + defs.join('\n\n');
       };
-      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'JSON tidak valid: ' + e.message); } const ts = gen(data, $('#rn', root).value.trim() || 'Root'); out.classList.remove('empty'); out.textContent = ts; withCopy(out, () => ts); };
+      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { out.textContent = '—'; out.classList.add('empty'); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'Invalid JSON: ' + e.message); } const ts = gen(data, $('#rn', root).value.trim() || 'Root'); out.classList.remove('empty'); out.textContent = ts; withCopy(out, () => ts); };
       $('#in', root).addEventListener('input', run); $('#rn', root).addEventListener('input', run);
     } },
 
   // ---------- GENERATOR ----------
-  { id: 'uuid', grp: 'Generator', e: '🆔', name: 'UUID Generator', desc: 'Buat UUID v4 acak (kriptografis), satu atau banyak.',
-    tujuan: '<b>Untuk apa:</b> membuat pengenal unik (ID) untuk record database, request, atau file tanpa risiko bentrok. <b>Kapan:</b> butuh primary key/ID acak yang praktis unik secara global.',
-    body(root) { root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Jumlah</label><input class="f" id="n" type="number" value="5" min="1" max="500" style="width:100px"><button class="btn acc" id="gen" type="button">Generate</button></div><div class="out empty" id="out" style="margin-top:12px">—</div>`; const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = crypto.getRandomValues(new Uint8Array(1))[0] % 16, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); })); const run = () => { const n = Math.max(1, Math.min(500, +$('#n', root).value || 1)); setOut($('#out', root), Array.from({ length: n }, uuid).join('\n')); }; $('#gen', root).addEventListener('click', run); run(); } },
+  { id: 'uuid', grp: 'Generator', e: '🆔', name: 'UUID Generator', desc: 'Generate random (cryptographic) UUID v4s, one or many.',
+    tujuan: '<b>What it\'s for:</b> generate unique identifiers (IDs) for database records, requests, or files with no risk of collision. <b>When:</b> you need a random primary key/ID that\'s practically globally unique.',
+    body(root) { root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Count</label><input class="f" id="n" type="number" value="5" min="1" max="500" style="width:100px"><button class="btn acc" id="gen" type="button">Generate</button></div><div class="out empty" id="out" style="margin-top:12px">—</div>`; const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = crypto.getRandomValues(new Uint8Array(1))[0] % 16, v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); })); const run = () => { const n = Math.max(1, Math.min(500, +$('#n', root).value || 1)); setOut($('#out', root), Array.from({ length: n }, uuid).join('\n')); }; $('#gen', root).addEventListener('click', run); run(); } },
 
-  { id: 'qr', grp: 'Generator', e: '📱', name: 'QR Code Generator', desc: 'Buat QR code dari teks/URL & unduh sebagai PNG.',
-    tujuan: '<b>Untuk apa:</b> mengubah teks, URL, WiFi, atau kontak menjadi QR yang bisa dipindai kamera HP. <b>Kapan:</b> berbagi tautan di poster/kartu nama, atau menyambungkan perangkat dengan cepat. Dibuat lokal (offline).',
+  { id: 'qr', grp: 'Generator', e: '📱', name: 'QR Code Generator', desc: 'Generate a QR code from text/URL & download as PNG.',
+    tujuan: '<b>What it\'s for:</b> turn text, a URL, WiFi, or a contact into a QR that a phone camera can scan. <b>When:</b> sharing a link on a poster/business card, or pairing devices quickly. Generated locally (offline).',
     contoh(root) { $('#in', root).value = 'https://ksatriabintangsamudra.my.id'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Teks / URL</label><textarea id="in" placeholder="https://…"></textarea>
-        <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Koreksi galat</label><select class="f" id="ec" style="width:150px"><option value="L">L (7%)</option><option value="M" selected>M (15%)</option><option value="Q">Q (25%)</option><option value="H">H (30%)</option></select>
-        <button class="btn sm" id="dl" type="button">⭳ Unduh PNG</button></div>
+      root.innerHTML = `<label class="lbl">Text / URL</label><textarea id="in" placeholder="https://…"></textarea>
+        <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Error correction</label><select class="f" id="ec" style="width:150px"><option value="L">L (7%)</option><option value="M" selected>M (15%)</option><option value="Q">Q (25%)</option><option value="H">H (30%)</option></select>
+        <button class="btn sm" id="dl" type="button">⭳ Download PNG</button></div>
         <div id="qrbox"></div><div id="err" class="note"></div>`;
       let lastCanvas = null;
       const run = () => {
@@ -454,21 +491,21 @@ const TOOLS = [
           ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, dim, dim); ctx.fillStyle = '#000';
           for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) ctx.fillRect(pad + c * cell, pad + r * cell, cell, cell);
           cv.style.width = cv.style.height = '260px'; box.appendChild(cv); lastCanvas = cv;
-        } catch (e) { box.style.display = 'none'; err.innerHTML = '<span class="pill err">Teks terlalu panjang untuk QR</span>'; }
+        } catch (e) { box.style.display = 'none'; err.innerHTML = '<span class="pill err">Text too long for a QR code</span>'; }
       };
       $('#dl', root).addEventListener('click', () => { if (!lastCanvas) return; const a = document.createElement('a'); a.href = lastCanvas.toDataURL('image/png'); a.download = 'qrcode.png'; a.click(); });
       $('#in', root).addEventListener('input', run); $('#ec', root).addEventListener('change', run);
     } },
 
-  { id: 'qrdecode', grp: 'Generator', e: '📷', name: 'Baca QR (Gambar)', desc: 'Unggah gambar berisi QR code untuk membaca teks/URL-nya.',
-    tujuan: '<b>Untuk apa:</b> membaca isi QR code dari sebuah gambar (screenshot / foto) langsung di browser — tanpa kamera &amp; <b>tanpa mengunggah gambar</b> ke server. <b>Kapan:</b> memeriksa tujuan sebuah QR sebelum membukanya, atau mengambil teks dari QR yang tampil di layar.',
+  { id: 'qrdecode', grp: 'Generator', e: '📷', name: 'QR Reader (Image)', desc: 'Upload an image containing a QR code to read its text/URL.',
+    tujuan: '<b>What it\'s for:</b> read the contents of a QR code from an image (screenshot / photo) right in the browser — no camera &amp; <b>without uploading the image</b> to a server. <b>When:</b> checking where a QR points before opening it, or pulling text from a QR shown on screen.',
     body(root) {
-      root.innerHTML = `<div class="drop" id="drop"><div class="big">Jatuhkan gambar QR di sini</div><div>atau klik untuk memilih · tempel (Ctrl/⌘+V) juga bisa · gambar tidak diunggah</div></div>
+      root.innerHTML = `<div class="drop" id="drop"><div class="big">Drop a QR image here</div><div>or click to choose · paste (Ctrl/⌘+V) also works · image not uploaded</div></div>
         <input type="file" id="file" accept="image/*" style="display:none"><div id="out" style="margin-top:12px"></div>`;
       const drop = $('#drop', root), file = $('#file', root), out = $('#out', root);
       async function decode(src) {
-        out.innerHTML = '<div class="out empty">memindai…</div>';
-        let jsQR; try { jsQR = await loadJsQR(); } catch (e) { return setErr(out, 'Gagal memuat pemindai QR'); }
+        out.innerHTML = '<div class="out empty">scanning…</div>';
+        let jsQR; try { jsQR = await loadJsQR(); } catch (e) { return setErr(out, 'Failed to load QR scanner'); }
         const img = new Image();
         img.onload = () => {
           const max = 1200, sc = Math.min(1, max / Math.max(img.width, img.height));
@@ -477,12 +514,12 @@ const TOOLS = [
           const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
           const data = ctx.getImageData(0, 0, w, h);
           const code = jsQR(data.data, w, h);
-          if (!code) return setErr(out, 'Tidak ada QR yang terbaca di gambar ini — coba gambar lebih jelas/besar');
+          if (!code) return setErr(out, 'No QR code could be read in this image — try a clearer/larger image');
           const txt = code.data, isUrl = /^https?:\/\//i.test(txt);
-          out.innerHTML = `<label class="lbl">Isi QR</label><div class="out">${esc(txt)}<button class="copy" data-c="${esc(txt)}">Salin</button></div>${isUrl ? `<div class="note">🔗 Ini tautan — periksa dulu sebelum membukanya.</div>` : ''}`;
+          out.innerHTML = `<label class="lbl">QR contents</label><div class="out">${esc(txt)}<button class="copy" data-c="${esc(txt)}">Copy</button></div>${isUrl ? `<div class="note">🔗 This is a link — check it before opening.</div>` : ''}`;
           out.querySelector('[data-c]').addEventListener('click', () => copy(txt));
         };
-        img.onerror = () => setErr(out, 'Gagal memuat gambar'); img.src = src;
+        img.onerror = () => setErr(out, 'Failed to load image'); img.src = src;
       }
       const handleFile = f => { if (!f || !f.type.startsWith('image/')) return; const r = new FileReader(); r.onload = () => decode(r.result); r.readAsDataURL(f); };
       drop.addEventListener('click', () => file.click());
@@ -494,11 +531,11 @@ const TOOLS = [
       addEventListener('paste', onPaste); onCleanup(() => removeEventListener('paste', onPaste));
     } },
 
-  { id: 'lorem', grp: 'Generator', e: '📄', name: 'Lorem Ipsum', desc: 'Buat teks placeholder (kata/kalimat/paragraf).',
-    tujuan: '<b>Untuk apa:</b> mengisi desain/mockup dengan teks contoh agar tata letak terlihat nyata sebelum konten asli ada. <b>Kapan:</b> membuat prototipe UI atau template.',
+  { id: 'lorem', grp: 'Generator', e: '📄', name: 'Lorem Ipsum', desc: 'Generate placeholder text (words/sentences/paragraphs).',
+    tujuan: '<b>What it\'s for:</b> fill a design/mockup with sample text so the layout looks real before the actual content exists. <b>When:</b> prototyping a UI or template.',
     body(root) {
       const W = 'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud exercitation ullamco laboris nisi aliquip ex ea commodo consequat duis aute irure in reprehenderit voluptate velit esse cillum'.split(' ');
-      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Jumlah</label><input class="f" id="n" type="number" value="3" min="1" max="50" style="width:90px"><div class="seg" id="u"><button data-u="para" class="on">Paragraf</button><button data-u="kal">Kalimat</button><button data-u="kata">Kata</button></div><button class="btn acc" id="gen" type="button">Buat</button></div><label class="lbl" style="margin-top:12px">Hasil</label><div class="out empty" id="out">—</div>`;
+      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Count</label><input class="f" id="n" type="number" value="3" min="1" max="50" style="width:90px"><div class="seg" id="u"><button data-u="para" class="on">Paragraphs</button><button data-u="kal">Sentences</button><button data-u="kata">Words</button></div><button class="btn acc" id="gen" type="button">Generate</button></div><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
       let unit = 'para'; const rnd = n => W[Math.floor(Math.random() * W.length)];
       const sentence = () => { const len = 8 + Math.floor(Math.random() * 8); let s = Array.from({ length: len }, rnd).join(' '); return s[0].toUpperCase() + s.slice(1) + '.'; };
       const para = () => Array.from({ length: 4 + Math.floor(Math.random() * 3) }, sentence).join(' ');
@@ -507,19 +544,19 @@ const TOOLS = [
       $('#gen', root).addEventListener('click', run); run();
     } },
 
-  { id: 'meta', grp: 'Generator', e: '🔖', name: 'Meta Tag & Open Graph', desc: 'Buat tag SEO, Open Graph, & Twitter Card + pratinjau.',
-    tujuan: '<b>Untuk apa:</b> membuat tag <b>SEO</b> &amp; <b>social share</b> (Open Graph / Twitter Card) untuk &lt;head&gt; halaman — judul, deskripsi, dan gambar pratinjau saat tautan dibagikan. <b>Kapan:</b> menyiapkan halaman agar tampil rapi di Google &amp; media sosial.',
-    contoh(root) { $('#mt', root).value = 'DevSec Toolbox — Alat Developer & Keamanan'; $('#md', root).value = '31 alat developer & keamanan gratis, 100% di browser.'; $('#mu', root).value = 'https://devsec.ksatriabintangsamudra.com/'; $('#mi', root).value = 'https://devsec.ksatriabintangsamudra.com/docs/home.png'; $('#ms', root).value = 'DevSec Toolbox'; fire($('#mt', root)); },
+  { id: 'meta', grp: 'Generator', e: '🔖', name: 'Meta Tag & Open Graph', desc: 'Generate SEO, Open Graph, & Twitter Card tags + preview.',
+    tujuan: '<b>What it\'s for:</b> generate <b>SEO</b> &amp; <b>social share</b> tags (Open Graph / Twitter Card) for a page\'s &lt;head&gt; — title, description, and preview image when a link is shared. <b>When:</b> preparing a page to look clean on Google &amp; social media.',
+    contoh(root) { $('#mt', root).value = 'DevSec Toolbox — Developer & Security Tools'; $('#md', root).value = '31 free developer & security tools, 100% in the browser.'; $('#mu', root).value = 'https://devsec.ksatriabintangsamudra.com/'; $('#mi', root).value = 'https://devsec.ksatriabintangsamudra.com/docs/home.png'; $('#ms', root).value = 'DevSec Toolbox'; fire($('#mt', root)); },
     body(root) {
-      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Judul</label><input class="f" id="mt" placeholder="Judul halaman"></div><div><label class="lbl">Nama situs</label><input class="f" id="ms" placeholder="Nama Situs"></div></div>
-        <label class="lbl" style="margin-top:12px">Deskripsi</label><textarea id="md" style="min-height:64px" placeholder="Deskripsi singkat (±155 karakter)"></textarea>
-        <div class="cardrow" style="margin-top:12px"><div><label class="lbl">URL</label><input class="f" id="mu" placeholder="https://…"></div><div><label class="lbl">Gambar / OG image (URL)</label><input class="f" id="mi" placeholder="https://…/og.png"></div></div>
-        <label class="lbl" style="margin-top:14px">Pratinjau Google</label><div id="gprev" class="serp"></div><div id="mcount" class="note"></div>
-        <label class="lbl" style="margin-top:12px">Tag untuk &lt;head&gt;</label><div class="out empty" id="out">—</div>`;
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Title</label><input class="f" id="mt" placeholder="Page title"></div><div><label class="lbl">Site name</label><input class="f" id="ms" placeholder="Site Name"></div></div>
+        <label class="lbl" style="margin-top:12px">Description</label><textarea id="md" style="min-height:64px" placeholder="Short description (±155 characters)"></textarea>
+        <div class="cardrow" style="margin-top:12px"><div><label class="lbl">URL</label><input class="f" id="mu" placeholder="https://…"></div><div><label class="lbl">Image / OG image (URL)</label><input class="f" id="mi" placeholder="https://…/og.png"></div></div>
+        <label class="lbl" style="margin-top:14px">Google preview</label><div id="gprev" class="serp"></div><div id="mcount" class="note"></div>
+        <label class="lbl" style="margin-top:12px">Tags for &lt;head&gt;</label><div class="out empty" id="out">—</div>`;
       const gv = id => $('#' + id, root).value.trim();
       const run = () => {
         const t = gv('mt'), d = gv('md'), u = gv('mu'), img = gv('mi'), s = gv('ms'), out = $('#out', root), e = x => x.replace(/"/g, '&quot;');
-        if (!t && !d) { out.textContent = '—'; out.classList.add('empty'); $('#gprev', root).innerHTML = '<div class="serp-empty">Isi judul & deskripsi untuk melihat pratinjau…</div>'; $('#mcount', root).innerHTML = ''; return; }
+        if (!t && !d) { out.textContent = '—'; out.classList.add('empty'); $('#gprev', root).innerHTML = '<div class="serp-empty">Enter a title & description to see a preview…</div>'; $('#mcount', root).innerHTML = ''; return; }
         const L = [];
         if (t) L.push(`<title>${e(t)}</title>`);
         if (d) L.push(`<meta name="description" content="${e(d)}">`);
@@ -535,68 +572,68 @@ const TOOLS = [
         if (d) L.push(`<meta name="twitter:description" content="${e(d)}">`);
         if (img) L.push(`<meta name="twitter:image" content="${e(img)}">`);
         const text = L.join('\n'); setOut(out, text);
-        let host = u || 'contoh.com'; try { host = new URL(u).host + new URL(u).pathname.replace(/\/$/, ''); } catch (_) { }
+        let host = u || 'example.com'; try { host = new URL(u).host + new URL(u).pathname.replace(/\/$/, ''); } catch (_) { }
         const dlen = d.length;
-        $('#gprev', root).innerHTML = `<div class="serp-url">${esc(host)}</div><div class="serp-title">${esc(t || 'Judul halaman')}</div><div class="serp-desc">${esc((d || 'Deskripsi akan tampil di sini.').slice(0, 160))}${dlen > 160 ? '…' : ''}</div>`;
-        $('#mcount', root).innerHTML = `Judul ${t.length} · Deskripsi ${dlen} karakter ${dlen > 160 ? '<span class="pill warn">>160, mungkin terpotong</span>' : dlen && dlen < 70 ? '<span class="pill warn">agak pendek</span>' : dlen ? '<span class="pill ok">panjang ideal</span>' : ''}`;
+        $('#gprev', root).innerHTML = `<div class="serp-url">${esc(host)}</div><div class="serp-title">${esc(t || 'Page title')}</div><div class="serp-desc">${esc((d || 'The description will appear here.').slice(0, 160))}${dlen > 160 ? '…' : ''}</div>`;
+        $('#mcount', root).innerHTML = `Title ${t.length} · Description ${dlen} characters ${dlen > 160 ? '<span class="pill warn">>160, may be truncated</span>' : dlen && dlen < 70 ? '<span class="pill warn">a bit short</span>' : dlen ? '<span class="pill ok">ideal length</span>' : ''}`;
       };
       root.querySelectorAll('input,textarea').forEach(x => x.addEventListener('input', run));
     } },
 
-  // ---------- KONVERSI ----------
-  { id: 'timestamp', grp: 'Konversi', e: '⏱️', name: 'Timestamp', desc: 'Konversi Unix timestamp ↔ tanggal (lokal & UTC).',
-    tujuan: '<b>Untuk apa:</b> menerjemahkan angka waktu Unix (detik sejak 1970) menjadi tanggal yang terbaca, dan sebaliknya. <b>Kapan:</b> membaca timestamp dari database, log, atau token (iat/exp).',
+  // ---------- CONVERTERS ----------
+  { id: 'timestamp', grp: 'Converters', e: '⏱️', name: 'Timestamp', desc: 'Convert Unix timestamp ↔ date (local & UTC).',
+    tujuan: '<b>What it\'s for:</b> translate a Unix time number (seconds since 1970) into a readable date, and back again. <b>When:</b> reading a timestamp from a database, log, or token (iat/exp).',
     contoh(root) { $('#now', root).click(); },
-    body(root) { root.innerHTML = `<div class="row"><button class="btn acc sm" id="now" type="button">Sekarang</button></div><label class="lbl">Unix timestamp (detik/milidetik)</label><input class="f" id="ts" placeholder="1735689600"><div id="o1" style="margin-top:6px"></div><label class="lbl" style="margin-top:16px">Tanggal (bebas format)</label><input class="f" id="dt" placeholder="2026-08-25 14:30"><div id="o2" style="margin-top:6px"></div>`; const fromTs = () => { const v = $('#ts', root).value.trim(), o = $('#o1', root); if (!v || isNaN(+v)) { o.innerHTML = ''; return; } let n = +v; if (v.length <= 11) n *= 1000; const d = new Date(n); if (isNaN(d)) return setErr(o, 'Tidak valid'); o.innerHTML = `<div class="kv"><span class="k">Lokal</span><span class="v">${esc(d.toLocaleString())}</span></div><div class="kv"><span class="k">UTC</span><span class="v">${esc(d.toUTCString())}</span></div><div class="kv"><span class="k">ISO 8601</span><span class="v">${esc(d.toISOString())}</span></div>`; }; const fromDt = () => { const v = $('#dt', root).value.trim(), o = $('#o2', root); if (!v) { o.innerHTML = ''; return; } const d = new Date(v); if (isNaN(d)) return setErr(o, 'Tidak bisa diparse'); o.innerHTML = `<div class="kv"><span class="k">Unix (detik)</span><span class="v">${Math.floor(d.getTime() / 1000)}</span></div><div class="kv"><span class="k">Unix (ms)</span><span class="v">${d.getTime()}</span></div>`; }; $('#ts', root).addEventListener('input', fromTs); $('#dt', root).addEventListener('input', fromDt); $('#now', root).addEventListener('click', () => { $('#ts', root).value = Math.floor(Date.now() / 1000); fromTs(); }); } },
+    body(root) { root.innerHTML = `<div class="row"><button class="btn acc sm" id="now" type="button">Now</button></div><label class="lbl">Unix timestamp (seconds/milliseconds)</label><input class="f" id="ts" placeholder="1735689600"><div id="o1" style="margin-top:6px"></div><label class="lbl" style="margin-top:16px">Date (any format)</label><input class="f" id="dt" placeholder="2026-08-25 14:30"><div id="o2" style="margin-top:6px"></div>`; const fromTs = () => { const v = $('#ts', root).value.trim(), o = $('#o1', root); if (!v || isNaN(+v)) { o.innerHTML = ''; return; } let n = +v; if (v.length <= 11) n *= 1000; const d = new Date(n); if (isNaN(d)) return setErr(o, 'Invalid'); o.innerHTML = `<div class="kv"><span class="k">Local</span><span class="v">${esc(d.toLocaleString())}</span></div><div class="kv"><span class="k">UTC</span><span class="v">${esc(d.toUTCString())}</span></div><div class="kv"><span class="k">ISO 8601</span><span class="v">${esc(d.toISOString())}</span></div>`; }; const fromDt = () => { const v = $('#dt', root).value.trim(), o = $('#o2', root); if (!v) { o.innerHTML = ''; return; } const d = new Date(v); if (isNaN(d)) return setErr(o, 'Cannot parse'); o.innerHTML = `<div class="kv"><span class="k">Unix (seconds)</span><span class="v">${Math.floor(d.getTime() / 1000)}</span></div><div class="kv"><span class="k">Unix (ms)</span><span class="v">${d.getTime()}</span></div>`; }; $('#ts', root).addEventListener('input', fromTs); $('#dt', root).addEventListener('input', fromDt); $('#now', root).addEventListener('click', () => { $('#ts', root).value = Math.floor(Date.now() / 1000); fromTs(); }); } },
 
-  { id: 'cron', grp: 'Konversi', e: '📅', name: 'Cron Parser', desc: 'Jelaskan ekspresi cron & tampilkan 5 jadwal berikutnya.',
-    tujuan: '<b>Untuk apa:</b> memahami arti ekspresi cron (mis. <span class="mono">0 9 * * 1</span>) dan kapan ia benar-benar akan berjalan. <b>Kapan:</b> menyetel cron job/scheduled task agar tidak salah jadwal.',
+  { id: 'cron', grp: 'Converters', e: '📅', name: 'Cron Parser', desc: 'Explain a cron expression & show the next 5 run times.',
+    tujuan: '<b>What it\'s for:</b> understand what a cron expression means (e.g. <span class="mono">0 9 * * 1</span>) and when it will actually run. <b>When:</b> setting up a cron job/scheduled task so the schedule is correct.',
     contoh(root) { $('#in', root).value = '0 9 * * 1-5'; fire($('#in', root)); },
     body(root) {
-      root.innerHTML = `<label class="lbl">Ekspresi cron (menit jam tgl bln hari)</label><input class="f" id="in" placeholder="0 9 * * 1-5"><div id="desc2" style="margin-top:10px"></div><label class="lbl" style="margin-top:14px">5 jadwal berikutnya</label><div class="out empty" id="out">—</div>`;
-      const NM = ['menit (0-59)', 'jam (0-23)', 'tanggal (1-31)', 'bulan (1-12)', 'hari (0-6, Min=0)'];
-      const parseField = (f, min, max) => { const set = new Set(); for (const part of f.split(',')) { let step = 1, range = part; const sl = part.split('/'); if (sl.length === 2) { range = sl[0]; step = +sl[1]; } let lo, hi; if (range === '*') { lo = min; hi = max; } else if (range.includes('-')) { const [a, b] = range.split('-'); lo = +a; hi = +b; } else { lo = hi = +range; } if (isNaN(lo) || isNaN(hi) || isNaN(step) || step < 1) throw new Error('bagian tidak valid: "' + part + '"'); for (let v = lo; v <= hi; v += step) if (v >= min && v <= max) set.add(v); } return set; };
+      root.innerHTML = `<label class="lbl">Cron expression (minute hour day-of-month month day-of-week)</label><input class="f" id="in" placeholder="0 9 * * 1-5"><div id="desc2" style="margin-top:10px"></div><label class="lbl" style="margin-top:14px">Next 5 run times</label><div class="out empty" id="out">—</div>`;
+      const NM = ['minute (0-59)', 'hour (0-23)', 'day of month (1-31)', 'month (1-12)', 'day of week (0-6, Sun=0)'];
+      const parseField = (f, min, max) => { const set = new Set(); for (const part of f.split(',')) { let step = 1, range = part; const sl = part.split('/'); if (sl.length === 2) { range = sl[0]; step = +sl[1]; } let lo, hi; if (range === '*') { lo = min; hi = max; } else if (range.includes('-')) { const [a, b] = range.split('-'); lo = +a; hi = +b; } else { lo = hi = +range; } if (isNaN(lo) || isNaN(hi) || isNaN(step) || step < 1) throw new Error('invalid part: "' + part + '"'); for (let v = lo; v <= hi; v += step) if (v >= min && v <= max) set.add(v); } return set; };
       const run = () => {
         const v = $('#in', root).value.trim(), out = $('#out', root), d2 = $('#desc2', root); d2.innerHTML = '';
         if (!v) { out.textContent = '—'; out.classList.add('empty'); return; }
-        const f = v.split(/\s+/); if (f.length !== 5) return setErr(out, 'Harus 5 bagian dipisah spasi (menit jam tgl bln hari)');
+        const f = v.split(/\s+/); if (f.length !== 5) return setErr(out, 'Must be 5 space-separated parts (minute hour day-of-month month day-of-week)');
         let sets; try { sets = [parseField(f[0], 0, 59), parseField(f[1], 0, 23), parseField(f[2], 1, 31), parseField(f[3], 1, 12), parseField(f[4], 0, 6)]; } catch (e) { return setErr(out, e.message); }
         d2.innerHTML = f.map((x, i) => `<div class="kv"><span class="k">${NM[i]}</span><span class="v">${esc(x)}</span></div>`).join('');
         const runs = []; const dt = new Date(); dt.setSeconds(0, 0); dt.setMinutes(dt.getMinutes() + 1);
         for (let guard = 0; guard < 366 * 24 * 60 && runs.length < 5; guard++) { const dow = dt.getDay(); if (sets[0].has(dt.getMinutes()) && sets[1].has(dt.getHours()) && sets[2].has(dt.getDate()) && sets[3].has(dt.getMonth() + 1) && sets[4].has(dow)) runs.push(new Date(dt).toLocaleString()); dt.setMinutes(dt.getMinutes() + 1); }
-        out.classList.remove('empty'); out.textContent = runs.length ? runs.join('\n') : 'Tidak ada jadwal dalam 1 tahun ke depan'; if (runs.length) withCopy(out, () => runs.join('\n'));
+        out.classList.remove('empty'); out.textContent = runs.length ? runs.join('\n') : 'No scheduled runs in the next year'; if (runs.length) withCopy(out, () => runs.join('\n'));
       };
       $('#in', root).addEventListener('input', run);
     } },
 
-  { id: 'urlparse', grp: 'Konversi', e: '🧭', name: 'URL Parser', desc: 'Uraikan URL menjadi bagian-bagiannya + tabel query.',
-    tujuan: '<b>Untuk apa:</b> membedah URL menjadi protokol, host, port, path, parameter query, dan fragment. <b>Kapan:</b> debugging tautan, memeriksa parameter tracking, atau menganalisis URL mencurigakan.',
-    contoh(root) { $('#in', root).value = 'https://user@shop.example.com:8443/produk/42?ref=promo&utm_source=ig#ulasan'; fire($('#in', root)); },
-    body(root) { root.innerHTML = `<label class="lbl">URL</label><input class="f" id="in" placeholder="https://…"><div id="out" style="margin-top:14px"></div>`; const run = () => { const v = $('#in', root).value.trim(), out = $('#out', root); if (!v) { out.innerHTML = ''; return; } let u; try { u = new URL(v); } catch (e) { return setErr(out, 'URL tidak valid'); } const rows = [['Protokol', u.protocol.replace(':', '')], ['Host', u.hostname], ['Port', u.port || '(default)'], ['Path', u.pathname], ['Fragment', u.hash.replace('#', '') || '(kosong)'], ['Origin', u.origin]]; let html = rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${esc(r[1])}</span></div>`).join(''); const params = [...u.searchParams.entries()]; if (params.length) html += '<label class="lbl" style="margin-top:14px">Query parameter</label>' + params.map(([k, val]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(val)}</span></div>`).join(''); out.innerHTML = html; }; $('#in', root).addEventListener('input', run); } },
+  { id: 'urlparse', grp: 'Converters', e: '🧭', name: 'URL Parser', desc: 'Break a URL into its parts + a query table.',
+    tujuan: '<b>What it\'s for:</b> dissect a URL into protocol, host, port, path, query parameters, and fragment. <b>When:</b> debugging a link, checking tracking parameters, or analyzing a suspicious URL.',
+    contoh(root) { $('#in', root).value = 'https://user@shop.example.com:8443/products/42?ref=promo&utm_source=ig#reviews'; fire($('#in', root)); },
+    body(root) { root.innerHTML = `<label class="lbl">URL</label><input class="f" id="in" placeholder="https://…"><div id="out" style="margin-top:14px"></div>`; const run = () => { const v = $('#in', root).value.trim(), out = $('#out', root); if (!v) { out.innerHTML = ''; return; } let u; try { u = new URL(v); } catch (e) { return setErr(out, 'Invalid URL'); } const rows = [['Protocol', u.protocol.replace(':', '')], ['Host', u.hostname], ['Port', u.port || '(default)'], ['Path', u.pathname], ['Fragment', u.hash.replace('#', '') || '(empty)'], ['Origin', u.origin]]; let html = rows.map(r => `<div class="kv"><span class="k">${r[0]}</span><span class="v">${esc(r[1])}</span></div>`).join(''); const params = [...u.searchParams.entries()]; if (params.length) html += '<label class="lbl" style="margin-top:14px">Query parameters</label>' + params.map(([k, val]) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v">${esc(val)}</span></div>`).join(''); out.innerHTML = html; }; $('#in', root).addEventListener('input', run); } },
 
-  { id: 'text', grp: 'Konversi', e: '📝', name: 'Teks & Kasus', desc: 'Ubah kapitalisasi, slug, hitung kata, urut/uniq/balik.',
-    tujuan: '<b>Untuk apa:</b> transformasi teks cepat — ubah huruf besar/kecil, buat slug URL, hitung kata, urutkan atau hapus baris duplikat. <b>Kapan:</b> merapikan daftar, membuat slug, atau menyiapkan data.',
-    contoh(root) { $('#in', root).value = 'Halo Dunia Yang Indah'; fire($('#in', root)); },
-    body(root) { root.innerHTML = `<label class="lbl">Teks</label><textarea id="in"></textarea><div class="row" style="margin-top:12px">${['UPPER', 'lower', 'Title Case', 'camelCase', 'snake_case', 'kebab-case', 'slug', 'Balik baris', 'Urutkan A-Z', 'Hapus duplikat'].map(x => `<button class="btn sm" data-op="${x}">${x}</button>`).join('')}</div><div id="stat" class="note"></div><label class="lbl" style="margin-top:10px">Hasil</label><div class="out empty" id="out">—</div>`; const words = s => (s.trim().match(/\S+/g) || []).length; const stat = () => { const v = $('#in', root).value; $('#stat', root).innerHTML = `${v.length} karakter · ${words(v)} kata · ${v ? v.split(/\n/).length : 0} baris`; }; const ops = { 'UPPER': s => s.toUpperCase(), 'lower': s => s.toLowerCase(), 'Title Case': s => s.replace(/\w\S*/g, t => t[0].toUpperCase() + t.slice(1).toLowerCase()), 'camelCase': s => s.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, c) => c.toUpperCase()), 'snake_case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), 'kebab-case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), 'slug': s => s.trim().toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, ''), 'Balik baris': s => s.split('\n').reverse().join('\n'), 'Urutkan A-Z': s => s.split('\n').sort((a, b) => a.localeCompare(b)).join('\n'), 'Hapus duplikat': s => [...new Set(s.split('\n'))].join('\n') }; root.querySelectorAll('[data-op]').forEach(b => b.addEventListener('click', () => setOut($('#out', root), ops[b.dataset.op]($('#in', root).value)))); $('#in', root).addEventListener('input', stat); stat(); } },
+  { id: 'text', grp: 'Converters', e: '📝', name: 'Text & Case', desc: 'Change capitalization, slugify, count words, sort/uniq/reverse.',
+    tujuan: '<b>What it\'s for:</b> quick text transforms — change upper/lowercase, build a URL slug, count words, sort or remove duplicate lines. <b>When:</b> tidying a list, making a slug, or preparing data.',
+    contoh(root) { $('#in', root).value = 'Hello Beautiful World'; fire($('#in', root)); },
+    body(root) { root.innerHTML = `<label class="lbl">Text</label><textarea id="in"></textarea><div class="row" style="margin-top:12px">${['UPPER', 'lower', 'Title Case', 'camelCase', 'snake_case', 'kebab-case', 'slug', 'Reverse lines', 'Sort A-Z', 'Remove duplicates'].map(x => `<button class="btn sm" data-op="${x}">${x}</button>`).join('')}</div><div id="stat" class="note"></div><label class="lbl" style="margin-top:10px">Result</label><div class="out empty" id="out">—</div>`; const words = s => (s.trim().match(/\S+/g) || []).length; const stat = () => { const v = $('#in', root).value; $('#stat', root).innerHTML = `${v.length} characters · ${words(v)} words · ${v ? v.split(/\n/).length : 0} lines`; }; const ops = { 'UPPER': s => s.toUpperCase(), 'lower': s => s.toLowerCase(), 'Title Case': s => s.replace(/\w\S*/g, t => t[0].toUpperCase() + t.slice(1).toLowerCase()), 'camelCase': s => s.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, c) => c.toUpperCase()), 'snake_case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), 'kebab-case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), 'slug': s => s.trim().toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, ''), 'Reverse lines': s => s.split('\n').reverse().join('\n'), 'Sort A-Z': s => s.split('\n').sort((a, b) => a.localeCompare(b)).join('\n'), 'Remove duplicates': s => [...new Set(s.split('\n'))].join('\n') }; root.querySelectorAll('[data-op]').forEach(b => b.addEventListener('click', () => setOut($('#out', root), ops[b.dataset.op]($('#in', root).value)))); $('#in', root).addEventListener('input', stat); stat(); } },
 
-  { id: 'color', grp: 'Konversi', e: '🎨', name: 'Konversi Warna', desc: 'Ubah warna antara HEX, RGB, dan HSL.',
-    tujuan: '<b>Untuk apa:</b> mengonversi kode warna antar format yang dipakai CSS/desain. <b>Kapan:</b> menyamakan warna dari Figma ke CSS, atau menyesuaikan palet.',
+  { id: 'color', grp: 'Converters', e: '🎨', name: 'Color Converter', desc: 'Convert colors between HEX, RGB, and HSL.',
+    tujuan: '<b>What it\'s for:</b> convert color codes between the formats used in CSS/design. <b>When:</b> matching a color from Figma to CSS, or adjusting a palette.',
     contoh(root) { $('#in', root).value = '#5eead4'; fire($('#in', root)); },
-    body(root) { root.innerHTML = `<div class="row"><input type="color" id="pick" value="#5eead4" style="width:52px;height:44px;border:1px solid var(--line);border-radius:9px;background:none;cursor:pointer"><input class="f" id="in" value="#5eead4" style="max-width:240px" placeholder="#5eead4 / rgb(94,234,212)"></div><div id="out" style="margin-top:12px"></div><div id="sw" style="height:70px;border-radius:12px;border:1px solid var(--line);margin-top:12px"></div>`; function parse(str) { str = str.trim(); let m = str.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i); if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; } m = str.match(/rgba?\(([^)]+)\)/i); if (m) { const p = m[1].split(',').map(x => parseFloat(x)); return [p[0], p[1], p[2]]; } return null; } const toHex = ([r, g, b]) => '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join(''); const toHsl = ([r, g, b]) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, s = 0, l = (mx + mn) / 2; if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h /= 6; } return `hsl(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`; }; const run = (src) => { const rgb = parse(src); const out = $('#out', root); if (!rgb || rgb.some(isNaN)) return setErr(out, 'Warna tidak valid'); const hexv = toHex(rgb); $('#sw', root).style.background = hexv; $('#pick', root).value = hexv; out.innerHTML = [['HEX', hexv], ['RGB', `rgb(${rgb.map(Math.round).join(', ')})`], ['HSL', toHsl(rgb)]].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v" style="cursor:pointer" data-c="${esc(v)}">${esc(v)} ⧉</span></div>`).join(''); out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c))); }; $('#in', root).addEventListener('input', e => run(e.target.value)); $('#pick', root).addEventListener('input', e => { $('#in', root).value = e.target.value; run(e.target.value); }); run('#5eead4'); } },
+    body(root) { root.innerHTML = `<div class="row"><input type="color" id="pick" value="#5eead4" style="width:52px;height:44px;border:1px solid var(--line);border-radius:9px;background:none;cursor:pointer"><input class="f" id="in" value="#5eead4" style="max-width:240px" placeholder="#5eead4 / rgb(94,234,212)"></div><div id="out" style="margin-top:12px"></div><div id="sw" style="height:70px;border-radius:12px;border:1px solid var(--line);margin-top:12px"></div>`; function parse(str) { str = str.trim(); let m = str.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i); if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; } m = str.match(/rgba?\(([^)]+)\)/i); if (m) { const p = m[1].split(',').map(x => parseFloat(x)); return [p[0], p[1], p[2]]; } return null; } const toHex = ([r, g, b]) => '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join(''); const toHsl = ([r, g, b]) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, s = 0, l = (mx + mn) / 2; if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h /= 6; } return `hsl(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`; }; const run = (src) => { const rgb = parse(src); const out = $('#out', root); if (!rgb || rgb.some(isNaN)) return setErr(out, 'Invalid color'); const hexv = toHex(rgb); $('#sw', root).style.background = hexv; $('#pick', root).value = hexv; out.innerHTML = [['HEX', hexv], ['RGB', `rgb(${rgb.map(Math.round).join(', ')})`], ['HSL', toHsl(rgb)]].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v" style="cursor:pointer" data-c="${esc(v)}">${esc(v)} ⧉</span></div>`).join(''); out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c))); }; $('#in', root).addEventListener('input', e => run(e.target.value)); $('#pick', root).addEventListener('input', e => { $('#in', root).value = e.target.value; run(e.target.value); }); run('#5eead4'); } },
 
-  { id: 'unit', grp: 'Konversi', e: '📐', name: 'Konversi Unit', desc: 'Konversi panjang, massa, suhu, & ukuran data.',
-    tujuan: '<b>Untuk apa:</b> mengonversi satuan yang sering dipakai — panjang, massa/berat, suhu, dan ukuran data — dengan cepat &amp; akurat (faktor konversi resmi). <b>Kapan:</b> mengubah km↔mil, kg↔pon, °C↔°F, atau MB↔GB.',
+  { id: 'unit', grp: 'Converters', e: '📐', name: 'Unit Converter', desc: 'Convert length, mass, temperature, & data sizes.',
+    tujuan: '<b>What it\'s for:</b> convert common units — length, mass/weight, temperature, and data size — quickly &amp; accurately (official conversion factors). <b>When:</b> converting km↔mi, kg↔lb, °C↔°F, or MB↔GB.',
     contoh(root) { $('#val', root).value = '100'; fire($('#val', root)); },
     body(root) {
       const CATS = {
-        'Panjang': { u: { 'Milimeter (mm)': .001, 'Sentimeter (cm)': .01, 'Meter (m)': 1, 'Kilometer (km)': 1000, 'Inci (in)': .0254, 'Kaki (ft)': .3048, 'Yard (yd)': .9144, 'Mil': 1609.344 } },
-        'Massa': { u: { 'Miligram (mg)': .001, 'Gram (g)': 1, 'Kilogram (kg)': 1000, 'Ton': 1e6, 'Ons (oz)': 28.349523125, 'Pon (lb)': 453.59237 } },
-        'Suhu': { temp: true, u: { 'Celsius (°C)': 'C', 'Fahrenheit (°F)': 'F', 'Kelvin (K)': 'K' } },
+        'Length': { u: { 'Millimeter (mm)': .001, 'Centimeter (cm)': .01, 'Meter (m)': 1, 'Kilometer (km)': 1000, 'Inch (in)': .0254, 'Foot (ft)': .3048, 'Yard (yd)': .9144, 'Mile': 1609.344 } },
+        'Mass': { u: { 'Milligram (mg)': .001, 'Gram (g)': 1, 'Kilogram (kg)': 1000, 'Tonne': 1e6, 'Ounce (oz)': 28.349523125, 'Pound (lb)': 453.59237 } },
+        'Temperature': { temp: true, u: { 'Celsius (°C)': 'C', 'Fahrenheit (°F)': 'F', 'Kelvin (K)': 'K' } },
         'Data': { u: { 'Bit': .125, 'Byte (B)': 1, 'Kilobyte (KB)': 1024, 'Megabyte (MB)': 1048576, 'Gigabyte (GB)': 1073741824, 'Terabyte (TB)': 1099511627776 } }
       };
-      root.innerHTML = `<div class="row"><div style="flex:1;min-width:160px"><label class="lbl">Kategori</label><select class="f" id="cat"></select></div></div>
-        <div class="cardrow"><div><label class="lbl">Dari</label><input class="f" id="val" placeholder="100"><select class="f" id="from" style="margin-top:8px"></select></div>
-        <div><label class="lbl">Ke</label><div class="out" id="res" style="min-height:auto;cursor:pointer" title="klik untuk menyalin">—</div><select class="f" id="to" style="margin-top:8px"></select></div></div>`;
+      root.innerHTML = `<div class="row"><div style="flex:1;min-width:160px"><label class="lbl">Category</label><select class="f" id="cat"></select></div></div>
+        <div class="cardrow"><div><label class="lbl">From</label><input class="f" id="val" placeholder="100"><select class="f" id="from" style="margin-top:8px"></select></div>
+        <div><label class="lbl">To</label><div class="out" id="res" style="min-height:auto;cursor:pointer" title="click to copy">—</div><select class="f" id="to" style="margin-top:8px"></select></div></div>`;
       const catSel = $('#cat', root), fromSel = $('#from', root), toSel = $('#to', root), val = $('#val', root), res = $('#res', root);
       catSel.innerHTML = Object.keys(CATS).map(c => `<option>${c}</option>`).join('');
       const toC = { C: v => v, F: v => (v - 32) * 5 / 9, K: v => v - 273.15 }, fromC = { C: v => v, F: v => v * 9 / 5 + 32, K: v => v + 273.15 };
@@ -607,51 +644,356 @@ const TOOLS = [
       fill(); run();
     } },
 
-  { id: 'contrast', grp: 'Konversi', e: '🌗', name: 'Kontras Warna (WCAG)', desc: 'Hitung rasio kontras dua warna & status lolos AA/AAA.',
-    tujuan: '<b>Untuk apa:</b> memastikan warna teks &amp; latar cukup <b>kontras</b> agar nyaman dibaca — sesuai standar aksesibilitas <b>WCAG</b>. Menampilkan rasio (mis. 4.5:1) &amp; lolos/gagal AA & AAA. <b>Kapan:</b> mendesain UI/web agar ramah semua pengguna.',
+  { id: 'contrast', grp: 'Converters', e: '🌗', name: 'Color Contrast (WCAG)', desc: 'Compute the contrast ratio of two colors & AA/AAA pass status.',
+    tujuan: '<b>What it\'s for:</b> make sure text &amp; background colors have enough <b>contrast</b> to read comfortably — per the <b>WCAG</b> accessibility standard. Shows the ratio (e.g. 4.5:1) &amp; pass/fail for AA & AAA. <b>When:</b> designing a UI/web page that\'s friendly to all users.',
     contoh(root) { $('#fg', root).value = '#0b1120'; $('#bg', root).value = '#5eead4'; fire($('#fg', root)); },
     body(root) {
-      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Warna teks</label><div class="row"><input type="color" id="fgp" value="#111111" class="cpick"><input class="f" id="fg" value="#111111"></div></div>
-        <div><label class="lbl">Warna latar</label><div class="row"><input type="color" id="bgp" value="#ffffff" class="cpick"><input class="f" id="bg" value="#ffffff"></div></div></div>
-        <div id="cprev" class="contrast-prev"><b>Teks contoh</b> — Aa Bb Cc 0123456789</div>
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Text color</label><div class="row"><input type="color" id="fgp" value="#111111" class="cpick"><input class="f" id="fg" value="#111111"></div></div>
+        <div><label class="lbl">Background color</label><div class="row"><input type="color" id="bgp" value="#ffffff" class="cpick"><input class="f" id="bg" value="#ffffff"></div></div></div>
+        <div id="cprev" class="contrast-prev"><b>Sample text</b> — Aa Bb Cc 0123456789</div>
         <div id="out" style="margin-top:12px"></div>`;
       const parse = s => { s = s.trim(); let m = s.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i); if (m) { let h = m[1]; if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; } m = s.match(/rgba?\(([^)]+)\)/i); if (m) { const p = m[1].split(',').map(parseFloat); return [p[0], p[1], p[2]]; } return null; };
       const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
       const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-      const run = () => { const fg = parse($('#fg', root).value), bg = parse($('#bg', root).value), out = $('#out', root); if (!fg || !bg || fg.some(isNaN) || bg.some(isNaN)) return setErr(out, 'Warna tidak valid (pakai #hex atau rgb())'); const L1 = lum(fg), L2 = lum(bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); const r = ratio.toFixed(2); const prev = $('#cprev', root); prev.style.color = `rgb(${fg.join(',')})`; prev.style.background = `rgb(${bg.join(',')})`; const b = ok => ok ? '<span class="pill ok">Lolos ✓</span>' : '<span class="pill err">Gagal ✕</span>'; out.innerHTML = `<div class="kv"><span class="k">Rasio kontras</span><span class="v"><b>${r} : 1</b></span></div><div class="kv"><span class="k">AA · teks normal (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div><div class="kv"><span class="k">AA · teks besar (≥ 3)</span><span class="v">${b(ratio >= 3)}</span></div><div class="kv"><span class="k">AAA · teks normal (≥ 7)</span><span class="v">${b(ratio >= 7)}</span></div><div class="kv"><span class="k">AAA · teks besar (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div>`; };
+      const run = () => { const fg = parse($('#fg', root).value), bg = parse($('#bg', root).value), out = $('#out', root); if (!fg || !bg || fg.some(isNaN) || bg.some(isNaN)) return setErr(out, 'Invalid color (use #hex or rgb())'); const L1 = lum(fg), L2 = lum(bg); const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05); const r = ratio.toFixed(2); const prev = $('#cprev', root); prev.style.color = `rgb(${fg.join(',')})`; prev.style.background = `rgb(${bg.join(',')})`; const b = ok => ok ? '<span class="pill ok">Pass ✓</span>' : '<span class="pill err">Fail ✕</span>'; out.innerHTML = `<div class="kv"><span class="k">Contrast ratio</span><span class="v"><b>${r} : 1</b></span></div><div class="kv"><span class="k">AA · normal text (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div><div class="kv"><span class="k">AA · large text (≥ 3)</span><span class="v">${b(ratio >= 3)}</span></div><div class="kv"><span class="k">AAA · normal text (≥ 7)</span><span class="v">${b(ratio >= 7)}</span></div><div class="kv"><span class="k">AAA · large text (≥ 4.5)</span><span class="v">${b(ratio >= 4.5)}</span></div>`; };
       $('#fgp', root).addEventListener('input', e => { $('#fg', root).value = e.target.value; run(); });
       $('#bgp', root).addEventListener('input', e => { $('#bg', root).value = e.target.value; run(); });
       $('#fg', root).addEventListener('input', e => { const v = e.target.value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) $('#fgp', root).value = v; run(); });
       $('#bg', root).addEventListener('input', e => { const v = e.target.value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) $('#bgp', root).value = v; run(); });
       run();
     } },
+
+  // ================= PHASE 2: NEW TOOLS =================
+// ============================================================================
+// Phase 2 — 15 new client-side tools. To be spliced into the TOOLS array in
+// app.js (before the closing `];`). Uses existing helpers: $, el, esc, setOut,
+// setErr, withCopy, copy, fire, enc, b64, b64url, unb64, hex, crypto, withProc.
+// Groups use the post-translation English names: Security, Encode / Decode,
+// Format & Data, Generator, Converters.
+// ============================================================================
+
+  // ---------- SECURITY (new) ----------
+  { id: 'secrets', grp: 'Security', e: '🕵️', name: 'Secret Scanner', desc: 'Detect leaked API keys, tokens & private keys in text or .env.',
+    tujuan: '<b>What it\'s for:</b> scans pasted code, logs, or <span class="mono">.env</span> files for hardcoded secrets — AWS keys, GitHub/Slack/Stripe tokens, Google API keys, private keys, JWTs, and password assignments. <b>When:</b> before committing or sharing a file, to catch credentials you forgot to remove. Everything runs in your browser — nothing is uploaded.',
+    contoh(root) { const demo = ['DB_PASSWORD=hunter2', 'AWS_ACCESS_KEY_ID=AKIA' + 'IOSFODNN7EXAMPLE', 'GITHUB_TOKEN=ghp' + '_1234567890abcdefghijklmnopqrstuvwx12', 'stripe=sk' + '_live_51H8xQ2eZvKYlo2Cabcdefghijklmnop'].join('\n'); $('#in', root).value = demo; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Paste code, logs, or a .env file</label><textarea id="in" style="min-height:170px" placeholder="paste here…"></textarea><div id="stat" style="margin-top:12px"></div><div id="out" style="margin-top:8px"></div>`;
+      const RULES = [
+        [/AKIA[0-9A-Z]{16}/g, 'AWS Access Key ID'],
+        [/(?:aws_secret_access_key|aws_secret)\s*[:=]\s*["']?([A-Za-z0-9/+]{40})/gi, 'AWS Secret Access Key'],
+        [/gh[pousr]_[A-Za-z0-9]{36}/g, 'GitHub Token'],
+        [/github_pat_[A-Za-z0-9_]{82}/g, 'GitHub Fine-grained PAT'],
+        [/xox[baprs]-[A-Za-z0-9-]{10,}/g, 'Slack Token'],
+        [/AIza[0-9A-Za-z\-_]{35}/g, 'Google API Key'],
+        [/sk_live_[0-9a-zA-Z]{24,}/g, 'Stripe Secret Key'],
+        [/(?:sk|rk)_(?:test|live)_[0-9a-zA-Z]{24,}/g, 'Stripe Key'],
+        [/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, 'JWT'],
+        [/-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----/g, 'Private Key block'],
+        [/(?:api[_-]?key|secret|token|passwd|password|pwd)\s*[:=]\s*["']?([^\s"'#]{6,})/gi, 'Generic secret assignment'],
+        [/postgres(?:ql)?:\/\/[^\s:@]+:[^\s@]+@/gi, 'Database URL with password'],
+      ];
+      const mask = s => s.length <= 8 ? s[0] + '•••' : s.slice(0, 4) + '•'.repeat(Math.min(12, s.length - 8)) + s.slice(-4);
+      const run = () => {
+        const v = $('#in', root).value, out = $('#out', root), stat = $('#stat', root);
+        if (!v.trim()) { stat.innerHTML = ''; out.innerHTML = ''; return; }
+        const lines = v.split('\n'); const hits = [];
+        for (const [re, label] of RULES) { let m; re.lastIndex = 0; while ((m = re.exec(v)) !== null) { const full = m[0]; const before = v.slice(0, m.index); const line = before.split('\n').length; hits.push({ label, match: full, line }); if (!re.global) break; if (m.index === re.lastIndex) re.lastIndex++; } }
+        // de-dup identical (label+match)
+        const seen = new Set(), uniq = hits.filter(h => { const k = h.label + '|' + h.match; if (seen.has(k)) return false; seen.add(k); return true; });
+        if (!uniq.length) { stat.innerHTML = '<span class="pill ok">✓ No obvious secrets found</span>'; out.innerHTML = '<div class="note">Heuristic scan only — a clean result is not a guarantee. Review sensitive files manually too.</div>'; return; }
+        stat.innerHTML = `<span class="pill err">⚠ ${uniq.length} potential secret${uniq.length > 1 ? 's' : ''} found</span>`;
+        out.innerHTML = uniq.map(h => `<div class="kv"><span class="k">${esc(h.label)} · line ${h.line}</span><span class="v mono">${esc(mask(h.match))}</span></div>`).join('') + '<div class="note">Rotate anything real that is exposed, and remove it from source & git history.</div>';
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'headers', grp: 'Security', e: '🧱', name: 'Security Headers Analyzer', desc: 'Grade HTTP response headers for CSP, HSTS, X-Frame & more.',
+    tujuan: '<b>What it\'s for:</b> paste a site\'s HTTP <b>response headers</b> and get a graded report on the key security headers (CSP, HSTS, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy). <b>When:</b> hardening a web app or auditing one. Tip: copy headers from your browser\'s DevTools → Network → Headers.',
+    contoh(root) { $('#in', root).value = 'HTTP/2 200\ncontent-type: text/html; charset=utf-8\nstrict-transport-security: max-age=63072000; includeSubDomains; preload\nx-content-type-options: nosniff\nx-frame-options: DENY'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">Paste HTTP response headers</label><textarea id="in" style="min-height:150px" placeholder="strict-transport-security: max-age=...&#10;content-security-policy: default-src 'self'"></textarea><div id="grade" style="margin-top:14px"></div><div id="out" style="margin-top:6px"></div>`;
+      const CHECKS = [
+        { key: 'strict-transport-security', name: 'Strict-Transport-Security (HSTS)', w: 20, ok: v => /max-age=\d{5,}/.test(v), tip: 'Add e.g. max-age=63072000; includeSubDomains; preload.' },
+        { key: 'content-security-policy', name: 'Content-Security-Policy (CSP)', w: 25, ok: v => v.length > 0 && !/unsafe-inline.*unsafe-eval/.test(v), warn: v => /unsafe-inline|unsafe-eval/.test(v), tip: 'Define a policy; avoid unsafe-inline / unsafe-eval where possible.' },
+        { key: 'x-content-type-options', name: 'X-Content-Type-Options', w: 15, ok: v => /nosniff/i.test(v), tip: 'Set to "nosniff".' },
+        { key: 'x-frame-options', name: 'X-Frame-Options', w: 15, ok: v => /deny|sameorigin/i.test(v), tip: 'Set to DENY or SAMEORIGIN (or use CSP frame-ancestors).' },
+        { key: 'referrer-policy', name: 'Referrer-Policy', w: 15, ok: v => v.length > 0, tip: 'Set e.g. strict-origin-when-cross-origin.' },
+        { key: 'permissions-policy', name: 'Permissions-Policy', w: 10, ok: v => v.length > 0, tip: 'Restrict powerful features (camera, geolocation, etc).' },
+      ];
+      const run = () => {
+        const v = $('#in', root).value, out = $('#out', root), gEl = $('#grade', root);
+        if (!v.trim()) { gEl.innerHTML = ''; out.innerHTML = ''; return; }
+        const map = {}; v.split('\n').forEach(l => { const i = l.indexOf(':'); if (i > 0) { const k = l.slice(0, i).trim().toLowerCase(); if (k && !/^http\//i.test(l)) map[k] = l.slice(i + 1).trim(); } });
+        let score = 0, total = 0; const rows = [];
+        for (const c of CHECKS) { total += c.w; const val = map[c.key]; let state, note; if (val == null) { state = 'err'; note = 'Missing — ' + c.tip; } else if (c.warn && c.warn(val)) { state = 'warn'; score += c.w * 0.5; note = 'Present but weak — ' + c.tip; } else if (c.ok(val)) { state = 'ok'; score += c.w; note = 'OK'; } else { state = 'warn'; score += c.w * 0.4; note = c.tip; } rows.push({ c, state, note }); }
+        const pct = Math.round(score / total * 100);
+        const grade = pct >= 90 ? 'A' : pct >= 75 ? 'B' : pct >= 60 ? 'C' : pct >= 40 ? 'D' : 'F';
+        const gcls = pct >= 75 ? 'ok' : pct >= 40 ? 'warn' : 'err';
+        gEl.innerHTML = `<div class="row" style="align-items:center;gap:14px"><span class="pill ${gcls}" style="font-size:16px;padding:6px 16px">Grade ${grade}</span><b class="mono">${pct}/100</b></div><div class="progress" style="margin-top:4px"><i style="width:${pct}%"></i></div>`;
+        out.innerHTML = rows.map(r => `<div class="kv"><span class="k">${r.state === 'ok' ? '✓' : r.state === 'warn' ? '!' : '✕'} ${esc(r.c.name)}</span><span class="v"><span class="pill ${r.state}">${r.state === 'ok' ? 'OK' : r.state === 'warn' ? 'Weak' : 'Missing'}</span></span></div>${r.state !== 'ok' ? `<div class="note" style="margin:2px 0 8px">${esc(r.note)}</div>` : ''}`).join('');
+      };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'cvss', grp: 'Security', e: '📊', name: 'CVSS 3.1 Calculator', desc: 'Compute a CVSS v3.1 base score, severity & vector.',
+    tujuan: '<b>What it\'s for:</b> turn the CVSS v3.1 base metrics into a <b>base score</b> (0–10), a severity rating, and the canonical vector string. <b>When:</b> triaging or reporting a vulnerability. Uses the official CVSS v3.1 formula.',
+    body(root) {
+      const M = {
+        AV: { label: 'Attack Vector', opts: [['N', 'Network', 0.85], ['A', 'Adjacent', 0.62], ['L', 'Local', 0.55], ['P', 'Physical', 0.2]] },
+        AC: { label: 'Attack Complexity', opts: [['L', 'Low', 0.77], ['H', 'High', 0.44]] },
+        PR: { label: 'Privileges Required', opts: [['N', 'None', 0], ['L', 'Low', 0], ['H', 'High', 0]] },
+        UI: { label: 'User Interaction', opts: [['N', 'None', 0.85], ['R', 'Required', 0.62]] },
+        S: { label: 'Scope', opts: [['U', 'Unchanged', 0], ['C', 'Changed', 0]] },
+        C: { label: 'Confidentiality', opts: [['H', 'High', 0.56], ['L', 'Low', 0.22], ['N', 'None', 0]] },
+        I: { label: 'Integrity', opts: [['H', 'High', 0.56], ['L', 'Low', 0.22], ['N', 'None', 0]] },
+        A: { label: 'Availability', opts: [['H', 'High', 0.56], ['L', 'Low', 0.22], ['N', 'None', 0]] },
+      };
+      const order = ['AV', 'AC', 'PR', 'UI', 'S', 'C', 'I', 'A'];
+      root.innerHTML = `<div class="cardrow">${order.map(k => `<div><label class="lbl">${M[k].label} (${k})</label><select class="f" id="m_${k}">${M[k].opts.map((o, i) => `<option value="${o[0]}"${i === 0 ? ' selected' : ''}>${o[1]} (${o[0]})</option>`).join('')}</select></div>`).join('')}</div><div id="out" style="margin-top:16px"></div>`;
+      const roundup = x => { const i = Math.round(x * 100000); return i % 10000 === 0 ? i / 100000 : (Math.floor(i / 10000) + 1) / 10; };
+      const run = () => {
+        const sel = {}; order.forEach(k => sel[k] = $('#m_' + k, root).value);
+        const scopeChanged = sel.S === 'C';
+        const prVal = { N: 0.85, L: scopeChanged ? 0.68 : 0.62, H: scopeChanged ? 0.5 : 0.27 }[sel.PR];
+        const g = (k, code) => M[k].opts.find(o => o[0] === code)[2];
+        const iscBase = 1 - (1 - g('C', sel.C)) * (1 - g('I', sel.I)) * (1 - g('A', sel.A));
+        const impact = scopeChanged ? 7.52 * (iscBase - 0.029) - 3.25 * Math.pow(iscBase - 0.02, 15) : 6.42 * iscBase;
+        const expl = 8.22 * g('AV', sel.AV) * g('AC', sel.AC) * prVal * g('UI', sel.UI);
+        let score = impact <= 0 ? 0 : roundup(Math.min((scopeChanged ? 1.08 : 1) * (impact + expl), 10));
+        const sev = score === 0 ? ['None', 'info'] : score < 4 ? ['Low', 'ok'] : score < 7 ? ['Medium', 'warn'] : score < 9 ? ['High', 'err'] : ['Critical', 'err'];
+        const vector = 'CVSS:3.1/' + order.map(k => k + ':' + sel[k]).join('/');
+        $('#out', root).innerHTML = `<div class="row" style="align-items:center;gap:14px"><span class="pill ${sev[1]}" style="font-size:18px;padding:7px 18px">${score.toFixed(1)}</span><b>${sev[0]}</b></div><label class="lbl" style="margin-top:12px">Vector string</label><div class="out">${esc(vector)}<button class="copy" data-c="${esc(vector)}">Copy</button></div>`;
+        $('#out', root).querySelector('[data-c]').addEventListener('click', e => copy(e.target.dataset.c));
+      };
+      root.querySelectorAll('select').forEach(s => s.addEventListener('change', run)); run();
+    } },
+
+  { id: 'token', grp: 'Security', e: '🎰', name: 'Random Token Generator', desc: 'Generate cryptographically-random tokens (hex/base64/url).',
+    tujuan: '<b>What it\'s for:</b> generate high-entropy random tokens using the browser\'s cryptographic RNG — for API keys, session IDs, CSRF tokens, or nonces. <b>When:</b> you need a secure random string. Never produced with Math.random.',
+    body(root) {
+      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Bytes</label><input class="f" id="n" type="number" value="32" min="4" max="256" style="width:100px"><label class="lbl" style="margin:0">Format</label><select class="f" id="fmt" style="width:160px"><option value="hex">Hex</option><option value="b64">Base64</option><option value="b64url">Base64 URL-safe</option><option value="alnum">Alphanumeric</option></select><label class="lbl" style="margin:0">Count</label><input class="f" id="c" type="number" value="1" min="1" max="100" style="width:90px"><button class="btn acc" id="gen" type="button">Generate</button></div><div class="out empty big" id="out" style="margin-top:12px">—</div><div class="note" id="meta"></div>`;
+      const alnum = bytes => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; return [...bytes].map(b => A[b % 62]).join(''); };
+      const run = () => {
+        const n = Math.max(4, Math.min(256, +$('#n', root).value || 32)), fmt = $('#fmt', root).value, c = Math.max(1, Math.min(100, +$('#c', root).value || 1));
+        const lines = []; for (let i = 0; i < c; i++) { const u = crypto.getRandomValues(new Uint8Array(n)); lines.push(fmt === 'hex' ? hex(u) : fmt === 'b64' ? b64(u) : fmt === 'b64url' ? b64url(u) : alnum(u)); }
+        setOut($('#out', root), lines.join('\n')); $('#meta', root).innerHTML = `Entropy ≈ <b>${n * 8} bit</b> per token · cryptographically secure`;
+      };
+      root.querySelectorAll('input,select').forEach(x => x.addEventListener('input', run)); $('#gen', root).addEventListener('click', run); run();
+    } },
+
+  // ---------- GENERATOR (new) ----------
+  { id: 'ulid', grp: 'Generator', e: '🪪', name: 'ULID Generator', desc: 'Generate sortable, timestamp-based unique IDs (ULID).',
+    tujuan: '<b>What it\'s for:</b> ULIDs are 26-character, URL-safe IDs that sort lexicographically by creation time — a friendlier alternative to UUID v4 for database keys. <b>When:</b> you want unique IDs that are also time-ordered.',
+    body(root) {
+      root.innerHTML = `<div class="row"><label class="lbl" style="margin:0">Count</label><input class="f" id="n" type="number" value="5" min="1" max="500" style="width:100px"><button class="btn acc" id="gen" type="button">Generate</button></div><div class="out empty" id="out" style="margin-top:12px">—</div><div class="note">Format: 48-bit timestamp (10 chars) + 80-bit randomness (16 chars), Crockford Base32.</div>`;
+      const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+      const encTime = (now, len) => { let s = ''; for (let i = len - 1; i >= 0; i--) { const mod = now % 32; s = ENC[mod] + s; now = (now - mod) / 32; } return s; };
+      const encRand = len => { const u = crypto.getRandomValues(new Uint8Array(len)); return [...u].map(b => ENC[b % 32]).join(''); };
+      const ulid = () => encTime(Date.now(), 10) + encRand(16);
+      const run = () => { const n = Math.max(1, Math.min(500, +$('#n', root).value || 1)); setOut($('#out', root), Array.from({ length: n }, ulid).join('\n')); };
+      $('#gen', root).addEventListener('click', run); run();
+    } },
+
+  { id: 'mock', grp: 'Generator', e: '🧪', name: 'Mock Data Generator', desc: 'Generate fake rows (name, email, etc.) as JSON or CSV.',
+    tujuan: '<b>What it\'s for:</b> quickly generate realistic-looking sample data for testing, seeding a database, or filling a UI. Pick the fields and row count, export as JSON or CSV. <b>When:</b> prototyping without real data. Generated locally.',
+    body(root) {
+      const FIELDS = ['id', 'uuid', 'name', 'email', 'username', 'city', 'country', 'phone', 'company', 'job', 'int', 'price', 'bool', 'date', 'ip'];
+      root.innerHTML = `<label class="lbl">Fields</label><div class="row" id="flds">${FIELDS.map((f, i) => `<label class="chk"><input type="checkbox" value="${f}" ${['name', 'email', 'city', 'int'].includes(f) ? 'checked' : ''}> ${f}</label>`).join('')}</div>
+        <div class="row" style="margin-top:8px"><label class="lbl" style="margin:0">Rows</label><input class="f" id="n" type="number" value="10" min="1" max="1000" style="width:100px"><div class="seg" id="out_m"><button data-m="json" class="on">JSON</button><button data-m="csv">CSV</button></div><button class="btn acc" id="gen" type="button">Generate</button><button class="btn sm" id="dl" type="button">⭳ Download</button></div>
+        <div class="out empty" id="out" style="margin-top:12px">—</div>`;
+      const FIRST = ['Nadia', 'Andi', 'Budi', 'Maya', 'Riko', 'Sari', 'Dewi', 'Aldo', 'Lina', 'Tomi', 'Olivia', 'Liam', 'Emma', 'Noah', 'Ava', 'Yuki', 'Hana', 'Diego', 'Sofia', 'Omar'];
+      const LAST = ['Pratama', 'Santoso', 'Wijaya', 'Putri', 'Hidayat', 'Smith', 'Johnson', 'Garcia', 'Kim', 'Tanaka', 'Rossi', 'Dubois', 'Novak', 'Haddad'];
+      const CITY = ['Jakarta', 'Pontianak', 'Bandung', 'Tokyo', 'Berlin', 'Austin', 'Lisbon', 'Nairobi', 'Toronto', 'Seoul', 'Oslo', 'Cairo'];
+      const COUNTRY = ['Indonesia', 'Japan', 'Germany', 'USA', 'Portugal', 'Kenya', 'Canada', 'South Korea', 'Norway', 'Egypt'];
+      const COMPANY = ['Luxavero', 'Acme Corp', 'Globex', 'Initech', 'Umbrella', 'Hooli', 'Stark Industries', 'Wayne Enterprises'];
+      const JOB = ['Engineer', 'Designer', 'Analyst', 'Manager', 'Architect', 'Consultant', 'Developer', 'Researcher'];
+      const ri = n => Math.floor(Math.random() * n), pick = a => a[ri(a.length)];
+      const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = ri(16), v = c === 'x' ? r : (r & 0x3 | 0x8); return v.toString(16); }));
+      const genVal = (f, i) => { const fn = pick(FIRST), ln = pick(LAST); switch (f) { case 'id': return i + 1; case 'uuid': return uuid(); case 'name': return fn + ' ' + ln; case 'email': return (fn + '.' + ln).toLowerCase() + '@' + pick(['mail.com', 'example.com', 'inbox.io', 'test.dev']); case 'username': return (fn + ln[0]).toLowerCase() + ri(1000); case 'city': return pick(CITY); case 'country': return pick(COUNTRY); case 'phone': return '+' + (10 + ri(80)) + ' ' + (100 + ri(900)) + '-' + (1000 + ri(9000)); case 'company': return pick(COMPANY); case 'job': return pick(JOB); case 'int': return ri(1000); case 'price': return (ri(100000) / 100).toFixed(2); case 'bool': return Math.random() < 0.5; case 'date': return new Date(Date.now() - ri(3e10)).toISOString().slice(0, 10); case 'ip': return [ri(256), ri(256), ri(256), ri(256)].join('.'); default: return ''; } };
+      let mode = 'json', lastText = '', lastExt = 'json';
+      const build = () => {
+        const flds = [...root.querySelectorAll('#flds input:checked')].map(c => c.value); if (!flds.length) { setErr($('#out', root), 'Pick at least one field'); return; }
+        const n = Math.max(1, Math.min(1000, +$('#n', root).value || 10));
+        const rows = Array.from({ length: n }, (_, i) => { const o = {}; flds.forEach(f => o[f] = genVal(f, i)); return o; });
+        if (mode === 'json') { lastText = JSON.stringify(rows, null, 2); lastExt = 'json'; }
+        else { const esc2 = v => { let s = typeof v === 'object' ? JSON.stringify(v) : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }; lastText = [flds.join(','), ...rows.map(r => flds.map(f => esc2(r[f])).join(','))].join('\r\n'); lastExt = 'csv'; }
+        setOut($('#out', root), lastText);
+      };
+      $('#out_m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#out_m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); build(); });
+      $('#gen', root).addEventListener('click', build);
+      $('#dl', root).addEventListener('click', () => { if (!lastText) return; const blob = new Blob([lastExt === 'csv' ? '\ufeff' + lastText : lastText], { type: lastExt === 'csv' ? 'text/csv' : 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mock-data.' + lastExt; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); });
+      build();
+    } },
+
+  // ---------- ENCODE / DECODE (new) ----------
+  { id: 'hex', grp: 'Encode / Decode', e: '🔣', name: 'Hex ↔ Text', desc: 'Convert text to hexadecimal and back (UTF-8).',
+    tujuan: '<b>What it\'s for:</b> convert text to its hexadecimal byte representation and back — useful for debugging encodings, binary protocols, or byte-level data. <b>When:</b> inspecting raw bytes of a string.',
+    contoh(root) { $('#in', root).value = 'DevSec 🔐'; fire($('#in', root)); },
+    body(root) {
+      let mode = 'encode';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Text → Hex</button><button data-m="decode">Hex → Text</button></div><label class="chk"><input type="checkbox" id="sp" checked> Space-separated</label></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const run = () => { const v = $('#in', root).value, out = $('#out', root); try { if (!v) { setOut(out, ''); return; } if (mode === 'encode') { const h = [...enc.encode(v)].map(b => b.toString(16).padStart(2, '0')); setOut(out, $('#sp', root).checked ? h.join(' ') : h.join('')); } else { const clean = v.replace(/0x/gi, '').replace(/[\s,]+/g, ''); if (!/^[0-9a-f]*$/i.test(clean) || clean.length % 2) throw 0; const bytes = new Uint8Array(clean.match(/../g).map(x => parseInt(x, 16))); setOut(out, new TextDecoder().decode(bytes)); } } catch (e) { setErr(out, 'Invalid hex input'); } };
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); });
+      $('#sp', root).addEventListener('change', run); $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'base32', grp: 'Encode / Decode', e: '🔠', name: 'Base32', desc: 'Encode & decode Base32 (RFC 4648).',
+    tujuan: '<b>What it\'s for:</b> Base32 encodes binary data using only A–Z and 2–7 — case-insensitive and safe for systems that mangle case or special characters (e.g. TOTP secrets, DNS). <b>When:</b> working with OTP seeds or case-insensitive tokens.',
+    contoh(root) { $('#in', root).value = 'DevSec Toolbox'; fire($('#in', root)); },
+    body(root) {
+      let mode = 'encode'; const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const b32enc = bytes => { let bits = 0, val = 0, out = ''; for (const b of bytes) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += A[(val >>> (bits - 5)) & 31]; bits -= 5; } } if (bits > 0) out += A[(val << (5 - bits)) & 31]; while (out.length % 8) out += '='; return out; };
+      const b32dec = str => { str = str.replace(/=+$/, '').toUpperCase().replace(/\s/g, ''); let bits = 0, val = 0; const out = []; for (const ch of str) { const idx = A.indexOf(ch); if (idx < 0) throw 0; val = (val << 5) | idx; bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; } } return new Uint8Array(out); };
+      const run = () => { const v = $('#in', root).value, out = $('#out', root); try { if (!v) { setOut(out, ''); return; } setOut(out, mode === 'encode' ? b32enc(enc.encode(v)) : new TextDecoder().decode(b32dec(v))); } catch (e) { setErr(out, 'Invalid Base32 input'); } };
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); });
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'base58', grp: 'Encode / Decode', e: '🅱️', name: 'Base58', desc: 'Encode & decode Base58 (Bitcoin alphabet).',
+    tujuan: '<b>What it\'s for:</b> Base58 drops easily-confused characters (0, O, I, l) and all punctuation — used by Bitcoin addresses, IPFS, and short IDs. <b>When:</b> producing human-friendly identifiers. Runs in your browser.',
+    contoh(root) { $('#in', root).value = 'Hello DevSec'; fire($('#in', root)); },
+    body(root) {
+      let mode = 'encode'; const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const enc58 = bytes => { let zeros = 0; while (zeros < bytes.length && bytes[zeros] === 0) zeros++; const digits = [0]; for (let i = zeros; i < bytes.length; i++) { let carry = bytes[i]; for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; } while (carry) { digits.push(carry % 58); carry = (carry / 58) | 0; } } let s = '1'.repeat(zeros); for (let i = digits.length - 1; i >= 0; i--) s += A[digits[i]]; return s; };
+      const dec58 = str => { str = str.trim(); let zeros = 0; while (zeros < str.length && str[zeros] === '1') zeros++; const bytes = [0]; for (let i = zeros; i < str.length; i++) { const val = A.indexOf(str[i]); if (val < 0) throw 0; let carry = val; for (let j = 0; j < bytes.length; j++) { carry += bytes[j] * 58; bytes[j] = carry & 255; carry >>= 8; } while (carry) { bytes.push(carry & 255); carry >>= 8; } } const out = new Uint8Array(zeros + bytes.length); for (let i = 0; i < bytes.length; i++) out[zeros + i] = bytes[bytes.length - 1 - i]; return out; };
+      const run = () => { const v = $('#in', root).value, out = $('#out', root); try { if (!v) { setOut(out, ''); return; } setOut(out, mode === 'encode' ? enc58(enc.encode(v)) : new TextDecoder().decode(dec58(v))); } catch (e) { setErr(out, 'Invalid Base58 input'); } };
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); });
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'unicode', grp: 'Encode / Decode', e: '🔤', name: 'Unicode Escape', desc: 'Escape text to \\uXXXX and back, with code points.',
+    tujuan: '<b>What it\'s for:</b> convert text to <span class="mono">\\uXXXX</span> escape sequences (and back), and inspect each character\'s Unicode code point. <b>When:</b> embedding non-ASCII safely in source code or debugging encoding issues.',
+    contoh(root) { $('#in', root).value = 'Halo 🌍 café'; fire($('#in', root)); },
+    body(root) {
+      let mode = 'escape';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="escape" class="on">Text → \\u</button><button data-m="unescape">\\u → Text</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const escU = s => { let out = ''; for (const ch of s) { const cp = ch.codePointAt(0); if (cp > 0xffff) { const h = cp - 0x10000; out += '\\u' + (0xd800 + (h >> 10)).toString(16).padStart(4, '0') + '\\u' + (0xdc00 + (h & 0x3ff)).toString(16).padStart(4, '0'); } else if (cp < 0x20 || cp > 0x7e) out += '\\u' + cp.toString(16).padStart(4, '0'); else out += ch; } return out; };
+      const unescU = s => s.replace(/\\u\{([0-9a-f]+)\}/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+      const run = () => { const v = $('#in', root).value, out = $('#out', root); if (!v) { setOut(out, ''); return; } setOut(out, mode === 'escape' ? escU(v) : unescU(v)); };
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); });
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  // ---------- FORMAT & DATA (new) ----------
+  { id: 'xml', grp: 'Format & Data', e: '🗂️', name: 'XML Formatter', desc: 'Pretty-print, minify & validate XML.',
+    tujuan: '<b>What it\'s for:</b> reformat messy XML into a readable, indented structure, minify it, and catch well-formedness errors. <b>When:</b> reading an API response, config, or SOAP payload.',
+    contoh(root) { $('#in', root).value = '<note><to>Nadia</to><from>DevSec</from><body>Hello <b>world</b></body></note>'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<div class="row"><button class="btn acc sm" id="fmt" type="button">Beautify</button><button class="btn sm" id="min" type="button">Minify</button><span id="stat"></span></div><label class="lbl">XML</label><textarea id="in" style="min-height:160px"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const check = v => { const doc = new DOMParser().parseFromString(v, 'application/xml'); const err = doc.querySelector('parsererror'); return err ? err.textContent.replace(/\s+/g, ' ').trim() : null; };
+      const pretty = xml => { let formatted = '', indent = 0; const PAD = '  '; xml = xml.replace(/>\s*</g, '><').replace(/</g, '\n<').trim(); xml.split('\n').forEach(node => { if (!node.trim()) return; if (/^<\/\w/.test(node)) indent = Math.max(0, indent - 1); formatted += PAD.repeat(indent) + node.trim() + '\n'; if (/^<\w[^>]*[^\/]>$/.test(node) && !/^<\w[^>]*>.*<\/\w/.test(node) && !/^<(\?|!)/.test(node)) indent++; }); return formatted.trim(); };
+      const show = minify => { const v = $('#in', root).value.trim(), out = $('#out', root), stat = $('#stat', root); if (!v) { setOut(out, ''); stat.innerHTML = ''; return; } const err = check(v); if (err) { stat.innerHTML = '<span class="pill err">Invalid</span>'; return setErr(out, err); } stat.innerHTML = '<span class="pill ok">Well-formed</span>'; setOut(out, minify ? v.replace(/>\s+</g, '><').trim() : pretty(v)); };
+      $('#fmt', root).addEventListener('click', () => show(false)); $('#min', root).addEventListener('click', () => show(true));
+      $('#in', root).addEventListener('input', () => show(false));
+    } },
+
+  { id: 'jsonxml', grp: 'Format & Data', e: '🧬', name: 'JSON → XML', desc: 'Convert a JSON object into XML.',
+    tujuan: '<b>What it\'s for:</b> turn JSON into equivalent XML — objects become nested elements, arrays repeat an <span class="mono">&lt;item&gt;</span> element. <b>When:</b> integrating with an XML/SOAP system from JSON data.',
+    contoh(root) { $('#in', root).value = '{"user":{"name":"Nadia","roles":["admin","editor"],"active":true}}'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><label class="lbl" style="margin-top:12px">XML</label><div class="out empty" id="out">—</div>`;
+      const escX = s => String(s).replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+      const tagName = k => /^[A-Za-z_][\w.-]*$/.test(k) ? k : 'item';
+      const toXml = (v, key, ind) => { const pad = '  '.repeat(ind); if (Array.isArray(v)) return v.map(it => toXml(it, key, ind)).join('\n'); if (v !== null && typeof v === 'object') { const inner = Object.keys(v).map(k => toXml(v[k], k, ind + 1)).join('\n'); return `${pad}<${tagName(key)}>\n${inner}\n${pad}</${tagName(key)}>`; } return `${pad}<${tagName(key)}>${escX(v == null ? '' : v)}</${tagName(key)}>`; };
+      const run = () => { const raw = $('#in', root).value.trim(), out = $('#out', root); if (!raw) { setOut(out, ''); return; } let data; try { data = JSON.parse(raw); } catch (e) { return setErr(out, 'Invalid JSON: ' + e.message); } const xml = '<?xml version="1.0" encoding="UTF-8"?>\n' + toXml(data, 'root', 0); setOut(out, xml); };
+      $('#in', root).addEventListener('input', run);
+    } },
+
+  { id: 'sql', grp: 'Format & Data', e: '🗄️', name: 'SQL Formatter', desc: 'Format & indent SQL queries for readability.',
+    tujuan: '<b>What it\'s for:</b> reformat a one-line or messy SQL query into a readable, indented layout with keywords on their own lines. <b>When:</b> reviewing a query from a log or ORM. Best-effort formatter for common SQL.',
+    contoh(root) { $('#in', root).value = 'select id, name, email from users u join orders o on o.user_id=u.id where u.active=1 and o.total>100 order by o.total desc limit 10'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<div class="row"><button class="btn acc sm" id="fmt" type="button">Format</button><label class="chk"><input type="checkbox" id="uc" checked> Uppercase keywords</label></div><label class="lbl">SQL</label><textarea id="in" style="min-height:120px"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const NL = ['SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET', 'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN', 'JOIN', 'ON', 'UNION', 'UNION ALL'];
+      const KW = [...NL, 'AS', 'IN', 'IS', 'NULL', 'NOT', 'LIKE', 'BETWEEN', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'ASC', 'DESC', 'INT', 'VARCHAR'];
+      const run = () => {
+        let v = $('#in', root).value.trim(); const out = $('#out', root); if (!v) { setOut(out, ''); return; }
+        const upper = $('#uc', root).checked;
+        v = v.replace(/\s+/g, ' ');
+        if (upper) for (const k of KW.sort((a, b) => b.length - a.length)) v = v.replace(new RegExp('\\b' + k.replace(/ /g, '\\s+') + '\\b', 'gi'), k);
+        for (const k of NL.sort((a, b) => b.length - a.length)) v = v.replace(new RegExp('\\s+(' + k.replace(/ /g, '\\s+') + ')\\b', 'gi'), (m, g) => '\n' + (upper ? k : g));
+        const lines = v.split('\n').map(l => { const t = l.trim(); return /^(AND|OR|ON)\b/i.test(t) ? '  ' + t : t; });
+        setOut(out, lines.join('\n').replace(/,\s*/g, ',\n  ').replace(/^\s*\n/gm, '').trim());
+      };
+      $('#fmt', root).addEventListener('click', run); $('#in', root).addEventListener('input', run); $('#uc', root).addEventListener('change', run);
+    } },
+
+  { id: 'markdown', grp: 'Format & Data', e: '📘', name: 'Markdown Preview', desc: 'Render Markdown to a live HTML preview & copy the HTML.',
+    tujuan: '<b>What it\'s for:</b> write or paste Markdown and see it rendered instantly, then copy the generated HTML. Supports headings, bold/italic, code, links, lists, blockquotes, and rules. <b>When:</b> drafting a README or checking formatting. Rendered safely in your browser.',
+    contoh(root) { $('#in', root).value = '# DevSec Toolbox\n\n**Fast**, private, *free* dev tools.\n\n- Runs in your browser\n- No data leaves your device\n\n> Privacy by design.\n\n`inline code` and a [link](https://devsec.ksatriabintangsamudra.com).'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<div class="cardrow"><div><label class="lbl">Markdown</label><textarea id="in" style="min-height:260px"></textarea></div><div><label class="lbl">Preview</label><div class="out" id="prev" style="min-height:260px"></div></div></div><div class="row" style="margin-top:12px"><button class="btn sm" id="cp" type="button">Copy HTML</button></div>`;
+      const esc2 = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      const inline = s => esc2(s)
+        .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+        .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      const render = md => {
+        const lines = md.replace(/\r\n?/g, '\n').split('\n'); let html = '', i = 0;
+        while (i < lines.length) {
+          const l = lines[i];
+          if (/^```/.test(l)) { let code = ''; i++; while (i < lines.length && !/^```/.test(lines[i])) code += lines[i++] + '\n'; i++; html += `<pre><code>${esc2(code.replace(/\n$/, ''))}</code></pre>`; continue; }
+          let m;
+          if (m = l.match(/^(#{1,6})\s+(.*)/)) { html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; i++; continue; }
+          if (/^\s*([-*_])\1{1,}\s*$/.test(l) || /^(---|\*\*\*|___)$/.test(l.trim())) { html += '<hr>'; i++; continue; }
+          if (/^>\s?/.test(l)) { let q = ''; while (i < lines.length && /^>\s?/.test(lines[i])) q += lines[i++].replace(/^>\s?/, '') + ' '; html += `<blockquote>${inline(q.trim())}</blockquote>`; continue; }
+          if (/^\s*[-*+]\s+/.test(l)) { html += '<ul>'; while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) html += `<li>${inline(lines[i++].replace(/^\s*[-*+]\s+/, ''))}</li>`; html += '</ul>'; continue; }
+          if (/^\s*\d+\.\s+/.test(l)) { html += '<ol>'; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) html += `<li>${inline(lines[i++].replace(/^\s*\d+\.\s+/, ''))}</li>`; html += '</ol>'; continue; }
+          if (l.trim() === '') { i++; continue; }
+          let para = ''; while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,6}\s|>|\s*[-*+]\s|\s*\d+\.\s|```)/.test(lines[i])) para += lines[i++] + ' '; html += `<p>${inline(para.trim())}</p>`;
+        }
+        return html;
+      };
+      let lastHtml = '';
+      const run = () => { lastHtml = render($('#in', root).value); $('#prev', root).innerHTML = lastHtml || '<span style="color:var(--tx3)">Preview…</span>'; };
+      $('#in', root).addEventListener('input', run); $('#cp', root).addEventListener('click', () => copy(lastHtml));
+      run();
+    } },
+
+  // ---------- CONVERTERS (new) ----------
+  { id: 'shades', grp: 'Converters', e: '🌈', name: 'Color Shades', desc: 'Generate a tint & shade palette from one base color.',
+    tujuan: '<b>What it\'s for:</b> from one base color, generate a full palette of lighter tints and darker shades (like a design-system color scale). <b>When:</b> building a UI theme and need consistent steps. Click any swatch to copy its hex.',
+    contoh(root) { $('#in', root).value = '#02aab0'; fire($('#in', root)); },
+    body(root) {
+      root.innerHTML = `<div class="row"><input type="color" id="pick" value="#02aab0" class="cpick"><input class="f" id="in" value="#02aab0" style="max-width:220px" placeholder="#02aab0"></div><div id="out" style="margin-top:14px"></div>`;
+      const toRgb = h => { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; };
+      const toHex = ([r, g, b]) => '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('');
+      const mix = (c, t, amt) => c.map((v, i) => v + (t[i] - v) * amt);
+      const run = (src) => { const out = $('#out', root); let hex6 = src.trim(); if (!/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex6)) return setErr(out, 'Enter a valid hex color'); const rgb = toRgb(hex6); const base = toHex(rgb); $('#pick', root).value = base; const steps = [['50', mix(rgb, [255, 255, 255], 0.9)], ['100', mix(rgb, [255, 255, 255], 0.78)], ['200', mix(rgb, [255, 255, 255], 0.6)], ['300', mix(rgb, [255, 255, 255], 0.42)], ['400', mix(rgb, [255, 255, 255], 0.22)], ['500', rgb], ['600', mix(rgb, [0, 0, 0], 0.18)], ['700', mix(rgb, [0, 0, 0], 0.34)], ['800', mix(rgb, [0, 0, 0], 0.5)], ['900', mix(rgb, [0, 0, 0], 0.66)]]; out.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px">${steps.map(([lbl, c]) => { const hx = toHex(c); const light = (c[0] * 299 + c[1] * 587 + c[2] * 114) / 1000 > 140; return `<button type="button" data-c="${hx}" style="border:1px solid var(--line2);border-radius:10px;padding:14px 10px;background:${hx};color:${light ? '#111' : '#fff'};cursor:pointer;font-family:var(--mono);font-size:12px;text-align:left"><b>${lbl}</b><br>${hx}</button>`; }).join('')}</div><div class="note">Click a swatch to copy its hex.</div>`; out.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => copy(b.dataset.c))); };
+      $('#in', root).addEventListener('input', e => run(e.target.value)); $('#pick', root).addEventListener('input', e => { $('#in', root).value = e.target.value; run(e.target.value); }); run('#02aab0');
+    } },
+
 ];
 
-const GROUPS = ['Keamanan', 'Encode / Decode', 'Format & Data', 'Generator', 'Konversi'];
-const HOME_TITLE = 'DevSec Toolbox — Alat Developer & Keamanan Online (100% di Browser)';
-const HOME_DESC = 'Kumpulan alat developer & keamanan gratis yang berjalan 100% di browser: JWT decoder, enkripsi AES, hash SHA & MD5, HMAC, JSON, regex, QR, konversi unit, dan lainnya. Tanpa server, data tidak dikirim ke mana pun.';
+const GROUPS = ['Security', 'Encode / Decode', 'Format & Data', 'Generator', 'Converters'];
+const HOME_TITLE = 'DevSec Toolbox — Developer & Security Tools Online (100% in the Browser)';
+const HOME_DESC = 'A collection of free developer & security tools that run 100% in the browser: JWT decoder, AES encryption, SHA & MD5 hashing, HMAC, JSON, regex, QR, unit conversion, and more. No server, no data sent anywhere.';
 
-// ================= RUTE (berbasis path, ramah SEO) =================
-// Tiap alat punya URL sendiri: <BASE><id>/ (mis. /devsec/jwt/). Klik menu = navigasi
-// dalam-halaman via History API (cepat, tanpa reload); akses langsung/crawler = halaman statis nyata.
+// ================= ROUTES (path-based, SEO-friendly) =================
+// Each tool has its own URL: <BASE><id>/ (e.g. /devsec/jwt/). Clicking the menu = in-page
+// navigation via the History API (fast, no reload); direct/crawler access = a real static page.
 const nav = $('#nav');
 const urlFor = id => id === 'home' ? BASE : BASE + id + '/';
 function tid(t) { return `<a class="nlink" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span> ${t.name}</a>`; }
 let navFilter = '';
 const openGroups = new Set();
 function navClick(e) { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(e.currentTarget.dataset.id, true); document.body.classList.remove('nav-open'); }
-// Sidebar kategori yang bisa dilipat: di beranda ringkas (semua terlipat), terbuka di halaman alat / saat dicari.
+// Collapsible category sidebar: compact on the home page (all collapsed), open on a tool page / while searching.
 function buildNav(filter = '') {
   navFilter = filter;
   const f = filter.toLowerCase().trim();
   const activeGroup = (TOOLS.find(t => t.id === current()) || {}).grp;
-  let html = `<a class="nlink navhome" data-id="home" href="${BASE}"><span class="e">🏠</span> Beranda</a>`;
+  let html = `<a class="nlink navhome" data-id="home" href="${BASE}"><span class="e">🏠</span> Home</a>`;
   for (const g of GROUPS) {
     const arr = TOOLS.filter(t => t.grp === g && (!f || (t.name + ' ' + t.id + ' ' + t.desc).toLowerCase().includes(f)));
     if (!arr.length) continue;
     const isOpen = f ? true : (g === activeGroup || openGroups.has(SLUG[g]));
     html += `<button type="button" class="grp${isOpen ? ' open' : ''}" data-g="${SLUG[g]}" aria-expanded="${isOpen}"><span class="gdot" data-grp="${SLUG[g]}"></span><span class="grp-name">${g}</span><span class="grp-cnt">${arr.length}</span><svg class="grp-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button><div class="grp-items${isOpen ? ' open' : ''}" data-g="${SLUG[g]}">${arr.map(tid).join('')}</div>`;
   }
+  if (!f || 'devsecops arsenal directory catalogue'.includes(f)) html += `<a class="nlink navhome" data-id="arsenal" href="${urlFor('arsenal')}" style="margin-top:8px"><span class="e">📚</span> DevSecOps Arsenal</a>`;
   nav.innerHTML = html;
   nav.querySelectorAll('a.nlink').forEach(a => a.addEventListener('click', navClick));
   nav.querySelectorAll('button.grp').forEach(b => b.addEventListener('click', () => { const items = nav.querySelector(`.grp-items[data-g="${b.dataset.g}"]`); const nowOpen = b.classList.toggle('open'); b.setAttribute('aria-expanded', String(nowOpen)); if (items) items.classList.toggle('open', nowOpen); nowOpen ? openGroups.add(b.dataset.g) : openGroups.delete(b.dataset.g); }));
@@ -669,29 +1011,32 @@ function current() {
   p = p.replace(/index\.html?$/i, '').replace(/^\/+|\/+$/g, '');
   const id = p.split('/')[0];
   if (!id) return 'home';
+  if (id === 'arsenal') return 'arsenal';
   if (TOOLS.some(t => t.id === id)) return id;
-  return document.body.dataset.tool && TOOLS.some(t => t.id === document.body.dataset.tool) ? document.body.dataset.tool : 'home';
+  const dt = document.body.dataset.tool;
+  if (dt === 'arsenal') return 'arsenal';
+  return dt && TOOLS.some(t => t.id === dt) ? dt : 'home';
 }
 function setMeta(title, desc) { document.title = title; const md = document.querySelector('meta[name="description"]'); if (md && desc) md.setAttribute('content', desc); }
 
-const SLUG = { 'Keamanan': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Konversi': 'konversi' };
+const SLUG = { 'Security': 'keamanan', 'Encode / Decode': 'encode', 'Format & Data': 'format', 'Generator': 'generator', 'Converters': 'konversi' };
 const card = t => `<a class="hcard" data-grp="${SLUG[t.grp]}" data-id="${t.id}" href="${urlFor(t.id)}"><span class="e">${t.e}</span><span class="hc-t"><b>${esc(t.name)}</b><span class="hc-d">${esc(t.desc)}</span></span><span class="hc-go">→</span></a>`;
 function renderHome() {
   runCleanup();
   const root = $('#tool');
-  $('#ttl').textContent = 'Beranda'; $('#desc').textContent = '';
+  $('#ttl').textContent = 'Home'; $('#desc').textContent = '';
   const counts = Object.fromEntries(GROUPS.map(g => [g, TOOLS.filter(t => t.grp === g).length]));
   const gdot = g => `<span class="gdot" data-grp="${SLUG[g]}"></span>`;
   root.innerHTML = `<div class="home-hero">
-      <div class="home-eyebrow">🧰 ${TOOLS.length} alat · 100% di browser · gratis</div>
-      <h2>Perkakas <span class="g">developer &amp; keamanan</span> yang berguna buat siapa saja.</h2>
-      <p>Dari decode JWT, enkripsi AES, hash &amp; HMAC, hingga QR, regex, konversi &amp; SEO — semuanya berjalan <b>di dalam browser-mu</b>, tanpa server &amp; tanpa kirim data. Gratis, buat siapa pun.</p>
-      <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="hsearch" type="text" placeholder="Cari alat… mis. jwt, hash, qr, warna, csv"><kbd>/</kbd></div>
-      <div class="home-badges"><span class="hb">🔒 <b>On-device</b></span><span class="hb">⚡ <b>Instan</b></span><span class="hb">✅ <b>Teruji</b></span><span class="hb">🆓 <b>Tanpa iklan</b></span></div>
+      <div class="home-eyebrow">🧰 ${TOOLS.length} tools · 100% in-browser · free</div>
+      <h2>Developer &amp; security tools <span class="g">that just work</span> — right in your browser.</h2>
+      <p>From decoding JWTs, AES encryption, hashing &amp; HMAC, to QR, regex, conversion &amp; SEO — everything runs <b>inside your browser</b>, with no server &amp; no data sent. Free, for everyone.</p>
+      <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="hsearch" type="text" placeholder="Search tools… e.g. jwt, hash, qr, color, csv"><kbd>/</kbd></div>
+      <div class="home-badges"><span class="hb">🔒 <b>On-device</b></span><span class="hb">⚡ <b>Instant</b></span><span class="hb">✅ <b>Tested</b></span><span class="hb">🆓 <b>No ads</b></span></div>
     </div>
-    <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">Semua <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
+    <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">All <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
     <div id="hgrid"></div>
-    <div class="home-foot">Dibuat oleh <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">kode sumber</a> · semua alat berjalan lokal di browser-mu.</div>`;
+    <div class="home-foot">Built by <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">source code</a> · every tool runs locally in your browser.</div>`;
   let group = 'all', query = '';
   const grid = $('#hgrid', root);
   const wire = () => grid.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));
@@ -701,7 +1046,7 @@ function renderHome() {
       grid.innerHTML = GROUPS.map(g => `<div class="home-grp">${gdot(g)}${esc(g)} <span class="hg-cnt">${counts[g]}</span></div><div class="home-grid">${TOOLS.filter(t => t.grp === g).map(card).join('')}</div>`).join('');
     } else {
       const arr = TOOLS.filter(t => (group === 'all' || t.grp === group) && (!q || (t.name + ' ' + t.id + ' ' + t.desc + ' ' + t.grp).toLowerCase().includes(q)));
-      grid.innerHTML = `<div class="home-grp">${arr.length} alat${q ? ` untuk “${esc(query.trim())}”` : ''}</div>` + (arr.length ? `<div class="home-grid">${arr.map(card).join('')}</div>` : `<div class="empty-note">😕 Tidak ada alat yang cocok. Coba kata kunci lain.</div>`);
+      grid.innerHTML = `<div class="home-grp">${arr.length} tools${q ? ` for “${esc(query.trim())}”` : ''}</div>` + (arr.length ? `<div class="home-grid">${arr.map(card).join('')}</div>` : `<div class="empty-note">😕 No tools matched. Try a different keyword.</div>`);
     }
     wire();
   };
@@ -712,13 +1057,50 @@ function renderHome() {
   markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
 
+// ---------- DevSecOps Arsenal (curated directory, lazy-loaded) ----------
+let _arsenal;
+function loadArsenal() { return _arsenal || (_arsenal = import(new URL('arsenal.js', import.meta.url).href)); }
+async function renderArsenal() {
+  runCleanup();
+  $('#ttl').textContent = 'DevSecOps Arsenal'; $('#desc').textContent = '';
+  const root = $('#tool');
+  root.innerHTML = `<div class="home-hero" style="padding-bottom:4px">
+      <div class="home-eyebrow">📚 Curated · open-source · from awesome-devsecops</div>
+      <h2>The DevSecOps <span class="g">Arsenal</span>.</h2>
+      <p class="arsenal-intro">A hand-picked directory of the best open-source DevSecOps tools — SAST, DAST, dependencies, secrets, containers, IaC, cloud &amp; supply-chain security. These run on your machine or CI (not in the browser); DevSec Toolbox just helps you discover and compare them.</p>
+      <div class="home-search"><svg class="hs-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.2-4.2"/></svg><input id="asearch" type="text" placeholder="Search the arsenal… e.g. terraform, sbom, kubernetes"></div>
+    </div>
+    <div class="home-filter" id="afilter"></div>
+    <div id="agrid"><div class="proc"><span class="spinner"></span>Loading the curated catalogue…</div></div>
+    <div class="home-foot">Curated from <a href="https://github.com/devsecops/awesome-devsecops" rel="noopener">awesome-devsecops</a> &amp; related lists · star counts are approximate · these tools link out to their own repos.</div>`;
+  setMeta('DevSecOps Arsenal — Curated DevSecOps Tools | DevSec Toolbox', 'A curated directory of the best open-source DevSecOps tools: SAST, DAST, SCA, secrets, containers, IaC, cloud & supply chain.');
+  markActive(); const mm = $('.main'); if (mm) mm.scrollTop = 0;
+  let mod; try { mod = await loadArsenal(); } catch (e) { const g = $('#agrid'); if (g) g.innerHTML = '<div class="empty-note">Failed to load the catalogue.</div>'; return; }
+  if (current() !== 'arsenal') return; // user navigated away while loading
+  const { ARSENAL, ARSENAL_CATS } = mod;
+  const fmtStars = n => !n ? '' : n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
+  let cat = 'all', q = '';
+  const fil = $('#afilter'), grid = $('#agrid');
+  fil.innerHTML = `<button class="chip on" data-c="all" type="button">All <span class="cnt">${ARSENAL.length}</span></button>` + ARSENAL_CATS.map(c => `<button class="chip" data-c="${esc(c)}" type="button">${esc(c)} <span class="cnt">${ARSENAL.filter(a => a.cat === c).length}</span></button>`).join('');
+  const acard = a => `<a class="ars-card" href="${esc(a.url)}" target="_blank" rel="noopener"><div class="ars-top"><b>${esc(a.name)}</b>${a.stars ? `<span class="ars-star">★ ${fmtStars(a.stars)}</span>` : ''}</div><div class="ars-d">${esc(a.desc)}</div><div class="ars-tags"><span class="ars-tag">${esc(a.cat)}</span>${(a.tags || []).map(t => `<span class="ars-tag">${esc(t)}</span>`).join('')}</div></a>`;
+  const render = () => {
+    const ql = q.toLowerCase().trim();
+    const arr = ARSENAL.filter(a => (cat === 'all' || a.cat === cat) && (!ql || (a.name + ' ' + a.desc + ' ' + a.cat + ' ' + (a.tags || []).join(' ')).toLowerCase().includes(ql)));
+    grid.innerHTML = arr.length ? `<div class="home-grid">${arr.map(acard).join('')}</div>` : `<div class="empty-note">😕 No tools matched. Try another keyword.</div>`;
+  };
+  fil.addEventListener('click', e => { const b = e.target.closest('.chip'); if (!b) return; cat = b.dataset.c; [...fil.children].forEach(c => c.classList.toggle('on', c === b)); render(); });
+  $('#asearch').addEventListener('input', e => { q = e.target.value; render(); });
+  render();
+}
+
 function open(id) {
   runCleanup();
   if (id === 'home') return renderHome();
+  if (id === 'arsenal') return renderArsenal();
   const t = TOOLS.find(x => x.id === id) || TOOLS[0];
   $('#ttl').textContent = t.name; $('#desc').textContent = t.desc;
   const root = $('#tool'); root.innerHTML = '';
-  const pb = el('div', 'purpose'); pb.innerHTML = `<span class="pi">${t.e}</span><div class="pt">${t.tujuan || esc(t.desc)}${t.contoh ? '<div class="ex"><button type="button" id="_ex">▶ Coba contoh</button></div>' : ''}</div>`;
+  const pb = el('div', 'purpose'); pb.innerHTML = `<span class="pi">${t.e}</span><div class="pt">${t.tujuan || esc(t.desc)}${t.contoh ? '<div class="ex"><button type="button" id="_ex">▶ Try example</button></div>' : ''}</div>`;
   root.appendChild(pb);
   const bodyWrap = el('div'); root.appendChild(bodyWrap); t.body(bodyWrap);
   if (t.contoh) $('#_ex', pb).addEventListener('click', () => t.contoh(bodyWrap));
@@ -726,11 +1108,11 @@ function open(id) {
   markActive(); const m = $('.main'); if (m) m.scrollTop = 0;
 }
 
-function go(id, push) { if (push) { const u = urlFor(id); if (location.pathname !== u) history.pushState({ id }, '', u); } open(id); }
+function go(id, push) { if (push) { const u = urlFor(id); if (location.pathname !== u) { history.pushState({ id }, '', u); prog.pulse(); } } open(id); }
 addEventListener('popstate', () => open(current()));
 $('#search').addEventListener('input', e => buildNav(e.target.value));
 $('#menutgl').addEventListener('click', () => document.body.classList.toggle('nav-open'));
-// tekan "/" untuk fokus ke pencarian (fokus ke cari-di-beranda jika ada, jika tidak ke sidebar)
+// press "/" to focus search (focus the home search if present, otherwise the sidebar)
 addEventListener('keydown', e => { if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) { e.preventDefault(); (document.getElementById('hsearch') || $('#search')).focus(); } });
 buildNav(); open(current());
 
