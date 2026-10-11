@@ -256,7 +256,7 @@ const TOOLS = [
 
   { id: 'url', grp: 'Encode / Decode', e: '🔗', name: 'URL Encode', desc: 'Encode & decode URL components (encodeURIComponent).',
     tujuan: '<b>What it\'s for:</b> make text safe inside a URL — spaces, &amp;, ?, / become %XX. <b>When:</b> building a query string or link parameters by hand.',
-    contoh(root) { $('#in', root).value = 'name=Andi & city=Yogyakarta?'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'name=Alex & city=Berlin?'; fire($('#in', root)); },
     body(root) { let mode = 'encode'; root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="encode" class="on">Encode</button><button data-m="decode">Decode</button></div></div><label class="lbl">Input</label><textarea id="in" placeholder="text or URL…"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const run = () => { const v = $('#in', root).value, out = $('#out', root); try { setOut(out, mode === 'encode' ? encodeURIComponent(v) : decodeURIComponent(v)); } catch (e) { setErr(out, 'Invalid input'); } }; $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); run(); }); $('#in', root).addEventListener('input', run); } },
 
   { id: 'htmlent', grp: 'Encode / Decode', e: '🏷️', name: 'HTML Entities', desc: 'Encode & decode HTML entities to display < > & on the web.',
@@ -304,7 +304,7 @@ const TOOLS = [
   // ---------- FORMAT & DATA ----------
   { id: 'json', grp: 'Format & Data', e: '📦', name: 'JSON Formatter', desc: 'Beautify, minify, & validate JSON with error messages.',
     tujuan: '<b>What it\'s for:</b> tidy up messy JSON so it\'s easy to read, compact it for production, and check whether it\'s valid. <b>When:</b> reading an API response or editing a config file.',
-    contoh(root) { $('#in', root).value = '{"name":"Andi","age":25,"skills":["JS","Go"],"active":true}'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = '{"name":"Alex","age":25,"skills":["JS","Go"],"active":true}'; fire($('#in', root)); },
     body(root) { root.innerHTML = `<div class="row"><button class="btn acc sm" id="fmt" type="button">Beautify</button><button class="btn sm" id="min" type="button">Minify</button><span id="stat"></span></div><label class="lbl">JSON</label><textarea id="in" style="min-height:180px" placeholder='{"hello":"world"}'></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`; const parse = () => { const v = $('#in', root).value.trim(), stat = $('#stat', root); if (!v) { stat.innerHTML = ''; return null; } try { const o = JSON.parse(v); stat.innerHTML = '<span class="pill ok">Valid</span>'; return o; } catch (e) { stat.innerHTML = '<span class="pill err">' + esc(e.message) + '</span>'; return undefined; } }; const show = (o, sp) => { const out = $('#out', root); if (o === undefined) return setErr(out, 'Invalid JSON'); if (o === null) { setOut(out, ''); return; } setOut(out, JSON.stringify(o, null, sp)); }; $('#fmt', root).addEventListener('click', () => show(parse(), 2)); $('#min', root).addEventListener('click', () => show(parse(), 0)); $('#in', root).addEventListener('input', () => { const o = parse(); if (o && o !== undefined) show(o, 2); }); } },
 
   { id: 'regex', grp: 'Format & Data', e: '🔍', name: 'Regex Tester', desc: 'Test regex, highlight matches, view capture groups.',
@@ -343,7 +343,7 @@ const TOOLS = [
 
   { id: 'jsoncsv', grp: 'Format & Data', e: '📊', name: 'JSON → CSV', desc: 'Convert a JSON array of objects into a CSV table (Excel-ready).',
     tujuan: '<b>What it\'s for:</b> turn JSON data (an array of objects) into CSV that opens in Excel / Google Sheets. Columns are taken from the union of all keys; object/array values are written as JSON; commas &amp; quotes are escaped per the RFC 4180 standard. <b>When:</b> exporting an API response or data to a spreadsheet.',
-    contoh(root) { $('#in', root).value = '[{"name":"Andi","age":25,"city":"Yogyakarta"},{"name":"Budi","age":30,"city":"Bandung","hobby":"chess"}]'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = '[{"name":"Alex","age":25,"city":"Berlin"},{"name":"Ben","age":30,"city":"Tokyo","hobby":"chess"}]'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">JSON (array of objects)</label><textarea id="in" style="min-height:150px" placeholder='[{"a":1,"b":2}]'></textarea>
         <div class="row" style="margin-top:10px"><label class="chk"><input type="checkbox" id="semi"> Semicolon separator (;)</label><button class="btn sm" id="dl" type="button">⭳ Download CSV</button><span id="stat"></span></div>
@@ -370,7 +370,7 @@ const TOOLS = [
 
   { id: 'csvjson', grp: 'Format & Data', e: '🧾', name: 'CSV → JSON', desc: 'Convert CSV (with a header) into a JSON array of objects.',
     tujuan: '<b>What it\'s for:</b> turn CSV data (from Excel/Sheets/an export) into a JSON array of objects ready to use in code/an API. The parser handles quotes, commas inside cells, &amp; newlines inside cells (RFC 4180). <b>When:</b> importing spreadsheet data into an app.',
-    contoh(root) { $('#in', root).value = 'name,age,city\nAndi,25,Yogyakarta\n"Budi, S.T.",30,Bandung'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'name,age,city\nAlex,25,Berlin\n"Ben, S.T.",30,Tokyo'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">CSV</label><textarea id="in" style="min-height:150px" placeholder="a,b,c&#10;1,2,3"></textarea>
         <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Separator</label><select class="f" id="sep" style="width:130px"><option value="auto">Auto-detect</option><option value=",">Comma ,</option><option value=";">Semicolon ;</option><option value="\t">Tab</option></select>
@@ -393,7 +393,7 @@ const TOOLS = [
 
   { id: 'jsonyaml', grp: 'Format & Data', e: '🧩', name: 'JSON → YAML', desc: 'Convert JSON into clean, valid YAML.',
     tujuan: '<b>What it\'s for:</b> convert JSON into <b>YAML</b> — a more readable config format (used by Docker Compose, Kubernetes, CI/CD, etc.). <b>When:</b> copying JSON data into a YAML config file. Runs in the browser.',
-    contoh(root) { $('#in', root).value = '{"name":"devsec","version":3,"active":true,"tags":["dev","security"],"meta":{"author":"Ksatria","tools":26}}'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = '{"name":"devsec","version":3,"active":true,"tags":["dev","security"],"meta":{"author":"Ksatria","tools":62}}'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><label class="lbl" style="margin-top:12px">YAML</label><div class="out empty" id="out">—</div>`;
       const scalar = v => { if (v === null) return 'null'; if (typeof v === 'boolean' || typeof v === 'number') return String(v); const s = String(v); if (s === '') return "''"; if (/[:#\[\]{}&*!|>'"%@`,]/.test(s) || /^[\s-?]/.test(s) || /\s$/.test(s) || /^(true|false|null|yes|no|on|off|~)$/i.test(s) || /^[-+]?[\d.]/.test(s) && /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(s)) return JSON.stringify(s); return s; };
@@ -410,7 +410,7 @@ const TOOLS = [
 
   { id: 'yamljson', grp: 'Format & Data', e: '🔃', name: 'YAML → JSON', desc: 'Convert YAML (common subset) into JSON.',
     tujuan: '<b>What it\'s for:</b> convert <b>YAML</b> (maps, lists, list-of-maps, scalars, comments) into JSON. <b>When:</b> copying a YAML config into JSON. Supports a common YAML subset; advanced features (anchors, multi-line blocks <span class="mono">|</span>/<span class="mono">&gt;</span>, flow style) are not yet supported and will return an error message rather than a wrong result.',
-    contoh(root) { $('#in', root).value = 'name: devsec\nversion: 3\nactive: true\ntags:\n  - dev\n  - security\nmeta:\n  author: Ksatria\n  tools: 26\nusers:\n  - name: Andi\n    role: admin\n  - name: Budi\n    role: editor'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'name: devsec\nversion: 3\nactive: true\ntags:\n  - dev\n  - security\nmeta:\n  author: Ksatria\n  tools: 62\nusers:\n  - name: Alex\n    role: admin\n  - name: Ben\n    role: editor'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">YAML</label><textarea id="in" style="min-height:170px" placeholder="key: value&#10;list:&#10;  - a&#10;  - b"></textarea><label class="lbl" style="margin-top:12px">JSON</label><div class="out empty" id="out">—</div>`;
       const findComment = s => { let q = null; for (let i = 0; i < s.length; i++) { const c = s[i]; if (q) { if (c === q) q = null; } else if (c === '"' || c === "'") q = c; else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return i; } return -1; };
@@ -432,7 +432,7 @@ const TOOLS = [
 
   { id: 'jsonts', grp: 'Format & Data', e: '🧠', name: 'JSON → TypeScript', desc: 'Generate TypeScript interfaces from sample JSON.',
     tujuan: '<b>What it\'s for:</b> auto-generate <b>TypeScript</b> type definitions (interfaces) from sample JSON data — saving time &amp; avoiding typos when modeling an API response. <b>When:</b> starting an API integration in a TypeScript project. Processed in the browser.',
-    contoh(root) { $('#in', root).value = '{"id":1,"name":"Nadia","active":true,"roles":["admin","editor"],"profile":{"age":25,"city":"Yogyakarta"},"tags":[]}'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = '{"id":1,"name":"Nadia","active":true,"roles":["admin","editor"],"profile":{"age":25,"city":"Berlin"},"tags":[]}'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">JSON</label><textarea id="in" style="min-height:150px" placeholder='{"a":1}'></textarea><div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Root name</label><input class="f" id="rn" value="Root" style="width:160px"></div><label class="lbl" style="margin-top:10px">TypeScript</label><div class="out empty" id="out">—</div>`;
       const pascal = s => { s = String(s).replace(/[^a-zA-Z0-9]+/g, ' ').trim(); if (!s) return 'X'; return s.split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join('').replace(/^([0-9])/, '_$1'); };
@@ -613,7 +613,7 @@ const TOOLS = [
 
   { id: 'text', grp: 'Converters', e: '📝', name: 'Text & Case', desc: 'Change capitalization, slugify, count words, sort/uniq/reverse.',
     tujuan: '<b>What it\'s for:</b> quick text transforms — change upper/lowercase, build a URL slug, count words, sort or remove duplicate lines. <b>When:</b> tidying a list, making a slug, or preparing data.',
-    contoh(root) { $('#in', root).value = 'Hello Beautiful World'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'Hello Beautiful World'; fire($('#in', root)); const b = root.querySelector('[data-op="slug"]'); if (b) b.click(); },
     body(root) { root.innerHTML = `<label class="lbl">Text</label><textarea id="in"></textarea><div class="row" style="margin-top:12px">${['UPPER', 'lower', 'Title Case', 'camelCase', 'snake_case', 'kebab-case', 'slug', 'Reverse lines', 'Sort A-Z', 'Remove duplicates'].map(x => `<button class="btn sm" data-op="${x}">${x}</button>`).join('')}</div><div id="stat" class="note"></div><label class="lbl" style="margin-top:10px">Result</label><div class="out empty" id="out">—</div>`; const words = s => (s.trim().match(/\S+/g) || []).length; const stat = () => { const v = $('#in', root).value; $('#stat', root).innerHTML = `${v.length} characters · ${words(v)} words · ${v ? v.split(/\n/).length : 0} lines`; }; const ops = { 'UPPER': s => s.toUpperCase(), 'lower': s => s.toLowerCase(), 'Title Case': s => s.replace(/\w\S*/g, t => t[0].toUpperCase() + t.slice(1).toLowerCase()), 'camelCase': s => s.toLowerCase().replace(/[^a-z0-9]+(.)/g, (_, c) => c.toUpperCase()), 'snake_case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), 'kebab-case': s => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), 'slug': s => s.trim().toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').replace(/[\s_]+/g, '-').replace(/^-+|-+$/g, ''), 'Reverse lines': s => s.split('\n').reverse().join('\n'), 'Sort A-Z': s => s.split('\n').sort((a, b) => a.localeCompare(b)).join('\n'), 'Remove duplicates': s => [...new Set(s.split('\n'))].join('\n') }; root.querySelectorAll('[data-op]').forEach(b => b.addEventListener('click', () => setOut($('#out', root), ops[b.dataset.op]($('#in', root).value)))); $('#in', root).addEventListener('input', stat); stat(); } },
 
   { id: 'color', grp: 'Converters', e: '🎨', name: 'Color Converter', desc: 'Convert colors between HEX, RGB, and HSL.',
@@ -865,7 +865,7 @@ const TOOLS = [
 
   { id: 'unicode', grp: 'Encode / Decode', e: '🔤', name: 'Unicode Escape', desc: 'Escape text to \\uXXXX and back, with code points.',
     tujuan: '<b>What it\'s for:</b> convert text to <span class="mono">\\uXXXX</span> escape sequences (and back), and inspect each character\'s Unicode code point. <b>When:</b> embedding non-ASCII safely in source code or debugging encoding issues.',
-    contoh(root) { $('#in', root).value = 'Halo 🌍 café'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'Hello 🌍 café'; fire($('#in', root)); },
     body(root) {
       let mode = 'escape';
       root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="escape" class="on">Text → \\u</button><button data-m="unescape">\\u → Text</button></div></div><label class="lbl">Input</label><textarea id="in"></textarea><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
