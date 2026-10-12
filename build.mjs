@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const BASE = 'https://devsec.ksatriabintangsamudra.com';
-const VER = 'v19';
+const VER = 'v20';
 const GSV = 'ZlDKMH0Zt-Piim2iJGkBhoYrzPu76yamyCvyOlsnF5c'; // Google Search Console
 const THEME = '#080b12';
 const OG = `${BASE}/docs/home.png`;
