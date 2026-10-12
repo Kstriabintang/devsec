@@ -903,16 +903,17 @@ const TOOLS = [
 
   { id: 'xor', grp: 'Encode / Decode', e: '🔀', name: 'XOR Cipher', desc: 'XOR data with a key, or brute-force single-byte XOR (CTF).',
     tujuan: '<b>What it\'s for:</b> XOR a message against a repeating key, or brute-force all 256 single-byte keys to crack a classic XOR cipher — a staple of CTF crypto. <b>When:</b> a decoded blob turns into unreadable bytes. Everything runs in your browser.',
-    contoh(root) { $('#in', root).value = '242e2325391072161d762c261d1a72101d362a711d212e7631317321313f'; $('#m button[data-m="brute"]', root).click(); },
+    contoh(root) { [...$('#m', root).children].forEach(b => b.classList.toggle('on', b.dataset.m === 'brute')); $('#keyrow', root).style.display = 'none'; $('#brow', root).style.display = ''; $('#in', root).value = '242e2325391072161d762c261d1a72101d362a711d212e7631317321313f'; fire($('#in', root)); },
     body(root) {
-      let mode = 'key', inFmt = 'hex';
+      let inFmt = 'hex';
+      const getMode = () => { const b = $('#m button.on', root); return b ? b.dataset.m : 'key'; };
       root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="key" class="on">XOR (key)</button><button data-m="brute">Brute 1-byte</button></div><label class="lbl" style="margin:0">Input format</label><select class="f" id="fmt" style="width:120px"><option value="hex">Hex</option><option value="text">Text</option><option value="b64">Base64</option></select></div><label class="lbl" style="margin-top:12px">Input</label><textarea id="in" placeholder="paste ciphertext…"></textarea><div class="row" id="keyrow" style="margin-top:12px"><label class="lbl" style="margin:0">Key</label><input class="f" id="key" style="max-width:240px" placeholder="key"><select class="f" id="kfmt" style="width:120px"><option value="text">Text key</option><option value="hex">Hex key</option></select></div><div class="row" id="brow" style="margin-top:12px;display:none"><label class="lbl" style="margin:0">Only show results containing</label><input class="f" id="needle" style="max-width:200px" value="flag"></div><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
       const toBytes = (v, fmt) => { v = v.trim(); if (fmt === 'hex') { const c = v.replace(/0x/gi, '').replace(/[\s,]+/g, ''); if (!/^[0-9a-f]*$/i.test(c) || c.length % 2) throw 0; return new Uint8Array(c.match(/../g).map(x => parseInt(x, 16))); } if (fmt === 'b64') { const bin = atob(v.replace(/\s/g, '')); return Uint8Array.from(bin, ch => ch.charCodeAt(0)); } return enc.encode(v); };
       const xorB = (d, k) => { const o = new Uint8Array(d.length); for (let i = 0; i < d.length; i++) o[i] = d[i] ^ k[i % k.length]; return o; };
       const printable = u8 => u8.length > 0 && [...u8].every(b => (b >= 32 && b < 127) || b === 9 || b === 10 || b === 13);
       const asText = u8 => new TextDecoder('utf-8', { fatal: false }).decode(u8);
       const run = () => {
-        const out = $('#out', root), v = $('#in', root).value;
+        const mode = getMode(), out = $('#out', root), v = $('#in', root).value;
         if (!v.trim()) { setOut(out, ''); return; }
         let data; try { data = toBytes(v, inFmt); } catch (e) { setErr(out, 'Invalid ' + inFmt + ' input'); return; }
         if (mode === 'key') {
@@ -932,7 +933,7 @@ const TOOLS = [
           out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c)));
         }
       };
-      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); $('#keyrow', root).style.display = mode === 'key' ? '' : 'none'; $('#brow', root).style.display = mode === 'brute' ? '' : 'none'; run(); });
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); $('#keyrow', root).style.display = e.target.dataset.m === 'key' ? '' : 'none'; $('#brow', root).style.display = e.target.dataset.m === 'brute' ? '' : 'none'; run(); });
       $('#fmt', root).addEventListener('change', e => { inFmt = e.target.value; run(); });
       $('#kfmt', root).addEventListener('change', run);
       ['#in', '#key', '#needle'].forEach(s => $(s, root).addEventListener('input', run));
