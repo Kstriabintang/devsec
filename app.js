@@ -901,6 +901,43 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run);
     } },
 
+  { id: 'xor', grp: 'Encode / Decode', e: '🔀', name: 'XOR Cipher', desc: 'XOR data with a key, or brute-force single-byte XOR (CTF).',
+    tujuan: '<b>What it\'s for:</b> XOR a message against a repeating key, or brute-force all 256 single-byte keys to crack a classic XOR cipher — a staple of CTF crypto. <b>When:</b> a decoded blob turns into unreadable bytes. Everything runs in your browser.',
+    contoh(root) { $('#in', root).value = '242e2325391072161d762c261d1a72101d362a711d212e7631317321313f'; $('#m button[data-m="brute"]', root).click(); },
+    body(root) {
+      let mode = 'key', inFmt = 'hex';
+      root.innerHTML = `<div class="row"><div class="seg" id="m"><button data-m="key" class="on">XOR (key)</button><button data-m="brute">Brute 1-byte</button></div><label class="lbl" style="margin:0">Input format</label><select class="f" id="fmt" style="width:120px"><option value="hex">Hex</option><option value="text">Text</option><option value="b64">Base64</option></select></div><label class="lbl" style="margin-top:12px">Input</label><textarea id="in" placeholder="paste ciphertext…"></textarea><div class="row" id="keyrow" style="margin-top:12px"><label class="lbl" style="margin:0">Key</label><input class="f" id="key" style="max-width:240px" placeholder="key"><select class="f" id="kfmt" style="width:120px"><option value="text">Text key</option><option value="hex">Hex key</option></select></div><div class="row" id="brow" style="margin-top:12px;display:none"><label class="lbl" style="margin:0">Only show results containing</label><input class="f" id="needle" style="max-width:200px" value="flag"></div><label class="lbl" style="margin-top:12px">Result</label><div class="out empty" id="out">—</div>`;
+      const toBytes = (v, fmt) => { v = v.trim(); if (fmt === 'hex') { const c = v.replace(/0x/gi, '').replace(/[\s,]+/g, ''); if (!/^[0-9a-f]*$/i.test(c) || c.length % 2) throw 0; return new Uint8Array(c.match(/../g).map(x => parseInt(x, 16))); } if (fmt === 'b64') { const bin = atob(v.replace(/\s/g, '')); return Uint8Array.from(bin, ch => ch.charCodeAt(0)); } return enc.encode(v); };
+      const xorB = (d, k) => { const o = new Uint8Array(d.length); for (let i = 0; i < d.length; i++) o[i] = d[i] ^ k[i % k.length]; return o; };
+      const printable = u8 => u8.length > 0 && [...u8].every(b => (b >= 32 && b < 127) || b === 9 || b === 10 || b === 13);
+      const asText = u8 => new TextDecoder('utf-8', { fatal: false }).decode(u8);
+      const run = () => {
+        const out = $('#out', root), v = $('#in', root).value;
+        if (!v.trim()) { setOut(out, ''); return; }
+        let data; try { data = toBytes(v, inFmt); } catch (e) { setErr(out, 'Invalid ' + inFmt + ' input'); return; }
+        if (mode === 'key') {
+          const kv = $('#key', root).value, kfmt = $('#kfmt', root).value;
+          if (!kv) { setOut(out, ''); return; }
+          let key; try { key = kfmt === 'hex' ? toBytes(kv, 'hex') : enc.encode(kv); } catch (e) { setErr(out, 'Invalid hex key'); return; }
+          if (!key.length) { setErr(out, 'Empty key'); return; }
+          const res = xorB(data, key), txt = asText(res);
+          out.classList.remove('empty');
+          out.innerHTML = `<div class="kv"><span class="k">Text</span><span class="v" data-c="${esc(txt)}" style="cursor:pointer;word-break:break-all">${esc(txt)} ⧉</span></div><div class="kv"><span class="k">Hex</span><span class="v" data-c="${hex(res)}" style="cursor:pointer;word-break:break-all">${hex(res)} ⧉</span></div>`;
+          out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c)));
+        } else {
+          const needle = $('#needle', root).value.toLowerCase(), rows = [];
+          for (let k = 0; k < 256; k++) { const res = xorB(data, new Uint8Array([k])), txt = asText(res); const ok = needle ? txt.toLowerCase().includes(needle) : printable(res); if (ok) rows.push(`<div class="kv"><span class="k">0x${k.toString(16).padStart(2, '0')}</span><span class="v" data-c="${esc(txt)}" style="cursor:pointer;word-break:break-all">${esc(txt)} ⧉</span></div>`); }
+          out.classList.remove('empty');
+          out.innerHTML = rows.length ? rows.join('') : '<span class="pill err">No matching key — clear the filter to see printable results</span>';
+          out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c)));
+        }
+      };
+      $('#m', root).addEventListener('click', e => { if (!e.target.dataset.m) return; mode = e.target.dataset.m; [...$('#m', root).children].forEach(b => b.classList.toggle('on', b === e.target)); $('#keyrow', root).style.display = mode === 'key' ? '' : 'none'; $('#brow', root).style.display = mode === 'brute' ? '' : 'none'; run(); });
+      $('#fmt', root).addEventListener('change', e => { inFmt = e.target.value; run(); });
+      $('#kfmt', root).addEventListener('change', run);
+      ['#in', '#key', '#needle'].forEach(s => $(s, root).addEventListener('input', run));
+    } },
+
   { id: 'sql', grp: 'Format & Data', e: '🗄️', name: 'SQL Formatter', desc: 'Format & indent SQL queries for readability.',
     tujuan: '<b>What it\'s for:</b> reformat a one-line or messy SQL query into a readable, indented layout with keywords on their own lines. <b>When:</b> reviewing a query from a log or ORM. Best-effort formatter for common SQL.',
     contoh(root) { $('#in', root).value = 'select id, name, email from users u join orders o on o.user_id=u.id where u.active=1 and o.total>100 order by o.total desc limit 10'; fire($('#in', root)); },
