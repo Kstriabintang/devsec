@@ -901,6 +901,44 @@ const TOOLS = [
       $('#in', root).addEventListener('input', run);
     } },
 
+  { id: 'fileinspect', grp: 'Security', e: '🔬', name: 'File Inspector (Forensics)', desc: 'Detect file type, read metadata (PNG/JPEG), find embedded files, extract strings — CTF forensics.',
+    tujuan: '<b>What it\'s for:</b> drop a file to reveal its true type (magic bytes), embedded text metadata (PNG tEXt/iTXt chunks, JPEG comments & EXIF), files hidden inside or appended (ZIP/PNG/JPEG/PDF/RAR/gzip signatures), and printable strings — the opening moves of CTF forensics. Base64-looking values are auto-decoded, and embedded files can be carved out. <b>When:</b> a challenge hands you a file and you must find what is hidden. Nothing is uploaded.',
+    body(root) {
+      root.innerHTML = `<div class="drop" id="fidrop"><div class="big">Drop a file here</div><div>or click to choose · any file · not uploaded</div></div><input type="file" id="fifile" style="display:none"><div id="fiout" style="margin-top:14px"></div>`;
+      const drop = $('#fidrop', root), file = $('#fifile', root), out = $('#fiout', root), td = new TextDecoder('latin1');
+      const kv = (k, v, cp) => `<div class="kv"><span class="k">${esc(k)}</span><span class="v"${cp ? ` data-c="${esc(v)}" style="cursor:pointer;word-break:break-all"` : ' style="word-break:break-all"'}>${esc(v)}${cp ? ' ⧉' : ''}</span></div>`;
+      const sec = (t, h) => `<div style="margin-top:14px"><div class="lbl">${t}</div>${h}</div>`;
+      const matchAt = (u8, m, at) => m.every((b, i) => u8[at + i] === b);
+      const SIGS = [[[0x89,0x50,0x4e,0x47],'PNG image'],[[0xff,0xd8,0xff],'JPEG image'],[[0x47,0x49,0x46,0x38],'GIF image'],[[0x42,0x4d],'BMP image'],[[0x50,0x4b,0x03,0x04],'ZIP (or docx/xlsx/jar/apk)'],[[0x25,0x50,0x44,0x46],'PDF document'],[[0x52,0x61,0x72,0x21],'RAR archive'],[[0x37,0x7a,0xbc,0xaf],'7-Zip'],[[0x1f,0x8b],'gzip'],[[0x49,0x44,0x33],'MP3 (ID3)'],[[0x52,0x49,0x46,0x46],'RIFF (wav/avi/webp)'],[[0x7f,0x45,0x4c,0x46],'ELF executable'],[[0x4d,0x5a],'DOS/PE executable']];
+      const detect = u8 => { for (const [m, n] of SIGS) if (matchAt(u8, m, 0)) return n; return 'unknown / data'; };
+      const pngText = u8 => { const r = []; if (!matchAt(u8, [0x89,0x50,0x4e,0x47], 0)) return r; let p = 8; const dv = new DataView(u8.buffer); while (p + 8 <= u8.length) { const len = dv.getUint32(p), type = td.decode(u8.subarray(p + 4, p + 8)), data = u8.subarray(p + 8, p + 8 + len); if (type === 'tEXt') { const i = data.indexOf(0); r.push([td.decode(data.subarray(0, i)), td.decode(data.subarray(i + 1))]); } else if (type === 'iTXt') { const i = data.indexOf(0), key = td.decode(data.subarray(0, i)), rest = data.subarray(i + 1); let j = 2; while (rest[j] !== 0 && j < rest.length) j++; j++; while (rest[j] !== 0 && j < rest.length) j++; j++; r.push([key, td.decode(rest.subarray(j))]); } else if (type === 'zTXt') { r.push([td.decode(data.subarray(0, data.indexOf(0))), '(compressed zTXt)']); } if (type === 'IEND') break; p += 12 + len; } return r; };
+      const jpegMeta = u8 => { const r = []; if (!matchAt(u8, [0xff,0xd8,0xff], 0)) return r; let p = 2; const dv = new DataView(u8.buffer); while (p + 4 <= u8.length) { if (u8[p] !== 0xff) break; const mk = u8[p + 1], len = dv.getUint16(p + 2); if (mk === 0xfe) r.push(['COM comment', td.decode(u8.subarray(p + 4, p + 2 + len))]); if (mk === 0xe1) { const asc = (td.decode(u8.subarray(p + 4, p + 2 + len)).match(/[\x20-\x7e]{4,}/g) || []).slice(0, 12); if (asc.length) r.push(['EXIF (ascii)', asc.join(' | ')]); } if (mk === 0xda) break; p += 2 + len; } return r; };
+      const embedded = u8 => { const r = [], look = [[[0x50,0x4b,0x03,0x04],'ZIP'],[[0x89,0x50,0x4e,0x47],'PNG'],[[0xff,0xd8,0xff,0xe0],'JPEG'],[[0x25,0x50,0x44,0x46],'PDF'],[[0x52,0x61,0x72,0x21],'RAR'],[[0x1f,0x8b,0x08],'gzip'],[[0x37,0x7a,0xbc,0xaf],'7z']]; for (let i = 1; i < u8.length - 4; i++) { for (const [m, n] of look) if (matchAt(u8, m, i)) r.push([n, i]); if (r.length > 40) break; } return r; };
+      const strs = (u8, min) => { const r = []; let c = ''; for (const b of u8) { if (b >= 0x20 && b < 0x7f) c += String.fromCharCode(b); else { if (c.length >= min) r.push(c); c = ''; } } if (c.length >= min) r.push(c); return r; };
+      const looksB64 = s => s.length >= 8 && s.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s);
+      const b64dec = s => { try { const u = Uint8Array.from(atob(s), c => c.charCodeAt(0)), t = new TextDecoder('utf-8', { fatal: false }).decode(u); return /[^\x09\x0a\x0d\x20-\x7e]/.test(t) ? '(binary, ' + u.length + ' bytes)' : t; } catch (e) { return null; } };
+      const analyze = (name, u8) => {
+        let html = sec('Overview', kv('File', name) + kv('Size', u8.length.toLocaleString('en') + ' bytes') + kv('Detected type (magic bytes)', detect(u8)));
+        const meta = [...pngText(u8), ...jpegMeta(u8)];
+        if (meta.length) { let m = ''; for (const [k, v] of meta) { m += kv(k, v, true); const t = v.trim(); if (looksB64(t)) { const d = b64dec(t); if (d) m += kv('  ↳ base64 decoded', d, true); } } html += sec('📑 Metadata / text fields', m); }
+        else html += sec('📑 Metadata', '<div class="note">No PNG text chunks or JPEG comments found. The secret may be in LSB, appended data, or strings below.</div>');
+        const emb = embedded(u8);
+        if (emb.length) { let e = ''; for (const [n, off] of emb) e += kv(n + ' signature', 'offset ' + off + ' (0x' + off.toString(16) + ')'); html += sec('🔍 Embedded files (hidden/appended)', e + '<div class="note">A signature at a non-zero offset usually means a file is hidden inside. Carve it out, then extract with your OS (e.g. <code>unzip</code> — use any passphrase found in metadata).</div><button class="btn sm" id="ficarve" type="button" style="margin-top:8px">⭳ Carve from offset ' + emb[0][1] + '</button>'); }
+        const all = strs(u8, 5), hot = all.filter(s => /flag\{|ctf\{|https?:\/\/|pass|secret|key|token|BEGIN /i.test(s));
+        if (hot.length) html += sec('⭐ Interesting strings', hot.slice(0, 20).map(s => kv('', s, true)).join(''));
+        html += sec('📝 All printable strings (first 80)', '<div class="out" style="max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all">' + esc(all.slice(0, 80).join('\n') || '(none)') + '</div>');
+        out.innerHTML = html;
+        out.querySelectorAll('[data-c]').forEach(x => x.addEventListener('click', () => copy(x.dataset.c)));
+        const cb = $('#ficarve', out); if (cb && emb.length) cb.addEventListener('click', () => { const off = emb[0][1], a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([u8.subarray(off)])); a.download = 'carved_' + emb[0][0].toLowerCase() + '_' + off; a.click(); });
+      };
+      const handle = f => { if (!f) return; const r = new FileReader(); r.onload = () => analyze(f.name, new Uint8Array(r.result)); r.readAsArrayBuffer(f); };
+      drop.addEventListener('click', () => file.click());
+      file.addEventListener('change', e => handle(e.target.files[0]));
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); handle(e.dataTransfer.files[0]); });
+    } },
+
   { id: 'xor', grp: 'Encode / Decode', e: '🔀', name: 'XOR Cipher', desc: 'XOR data with a key, or brute-force single-byte XOR (CTF).',
     tujuan: '<b>What it\'s for:</b> XOR a message against a repeating key, or brute-force all 256 single-byte keys to crack a classic XOR cipher — a staple of CTF crypto. <b>When:</b> a decoded blob turns into unreadable bytes. Everything runs in your browser.',
     contoh(root) { [...$('#m', root).children].forEach(b => b.classList.toggle('on', b.dataset.m === 'brute')); $('#keyrow', root).style.display = 'none'; $('#brow', root).style.display = ''; $('#in', root).value = '242e2325391072161d762c261d1a72101d362a711d212e7631317321313f'; fire($('#in', root)); },
