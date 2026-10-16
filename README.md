@@ -52,4 +52,4 @@ HTML + CSS + JavaScript **murni**. Kripto memakai **Web Crypto API** (`crypto.su
 
 ---
 
-<div align="center"><sub><b>DevSec Toolbox</b> · dibuat oleh <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · lisensi MIT</sub></div>
+<div align="center"><sub><b>DevSec Toolbox</b> · dibuat oleh <a href="https://ksatriabintangsamudra.com">Ksatria Bintang Samudra</a> · lisensi MIT</sub></div>
