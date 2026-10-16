@@ -473,7 +473,7 @@ const TOOLS = [
 
   { id: 'qr', grp: 'Generator', e: '📱', name: 'QR Code Generator', desc: 'Generate a QR code from text/URL & download as PNG.',
     tujuan: '<b>What it\'s for:</b> turn text, a URL, WiFi, or a contact into a QR that a phone camera can scan. <b>When:</b> sharing a link on a poster/business card, or pairing devices quickly. Generated locally (offline).',
-    contoh(root) { $('#in', root).value = 'https://ksatriabintangsamudra.my.id'; fire($('#in', root)); },
+    contoh(root) { $('#in', root).value = 'https://ksatriabintangsamudra.com'; fire($('#in', root)); },
     body(root) {
       root.innerHTML = `<label class="lbl">Text / URL</label><textarea id="in" placeholder="https://…"></textarea>
         <div class="row" style="margin-top:10px"><label class="lbl" style="margin:0">Error correction</label><select class="f" id="ec" style="width:150px"><option value="L">L (7%)</option><option value="M" selected>M (15%)</option><option value="Q">Q (25%)</option><option value="H">H (30%)</option></select>
@@ -1482,7 +1482,7 @@ function renderHome() {
     </div>
     <div class="home-filter" id="hfilter"><button class="chip on" data-g="all" type="button">All <span class="cnt">${TOOLS.length}</span></button>${GROUPS.map(g => `<button class="chip" data-g="${esc(g)}" type="button">${esc(g)} <span class="cnt">${counts[g]}</span></button>`).join('')}</div>
     <div id="hgrid"></div>
-    <div class="home-foot">Built by <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">source code</a> · every tool runs locally in your browser.</div>`;
+    <div class="home-foot">Built by <a href="https://ksatriabintangsamudra.com">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">source code</a> · every tool runs locally in your browser.</div>`;
   let group = 'all', query = '';
   const grid = $('#hgrid', root);
   const wire = () => grid.querySelectorAll('.hcard').forEach(a => a.addEventListener('click', e => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return; e.preventDefault(); go(a.dataset.id, true); }));

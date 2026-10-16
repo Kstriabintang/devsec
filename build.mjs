@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const BASE = 'https://devsec.ksatriabintangsamudra.com';
-const VER = 'v20';
+const VER = 'v21';
 const GSV = 'ZlDKMH0Zt-Piim2iJGkBhoYrzPu76yamyCvyOlsnF5c'; // Google Search Console
 const THEME = '#080b12';
 const OG = `${BASE}/docs/home.png`;
@@ -130,7 +130,7 @@ function buildHome(tools) {
   </div>
   <div class="home-filter" id="hfilter">${chips}</div>
   <div id="hgrid">${grid}</div>
-  <div class="home-foot">Built by <a href="https://ksatriabintangsamudra.my.id">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">source code</a> · every tool runs locally in your browser.</div></div></div>`;
+  <div class="home-foot">Built by <a href="https://ksatriabintangsamudra.com">Ksatria Bintang Samudra</a> · <a href="https://github.com/Kstriabintang/devsec" rel="noopener">source code</a> · every tool runs locally in your browser.</div></div></div>`;
   const html = head({ title, desc, canonical: `${BASE}/`, jsonld }) + shell({ dataTool: 'home', h1: 'Home', rel: '', navInner: navHtml(tools, 'home'), mainInner });
   writeFileSync(join(ROOT, 'index.html'), html);
 }
